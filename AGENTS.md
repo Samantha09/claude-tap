@@ -44,7 +44,7 @@ git config core.hooksPath .githooks
 1. 每次 commit 前运行 gate 检查：`uv run ruff check .`、`uv run ruff format --check .`、`uv run pytest tests/ -x --timeout=60`。启用 pre-commit hook 可自动执行 lint 检查。
 2. UI 变更要求在 PR 中提供使用 `raw.githubusercontent.com` 绝对 URL 的截图。
 3. 每个 commit 只处理一个关注点（不要在同一 commit 中混合 refactor 与 feature/fix）。
-4. 代码、注释、commit message 和 skill 文件仅使用英文。对外文档必须中英文双份，中文内容放在 `README_zh.md` 或对应的 `*.zh.md` 文件中。
+4. 代码、注释和 skill 文件仅使用英文；commit message 一律使用中文（含 type/scope 前缀，如 `fix(proxy): 修复上游 TLS 证书验证`）。对外文档必须中英文双份，中文内容放在 `README_zh.md` 或对应的 `*.zh.md` 文件中。
 5. 证据必须使用 `.traces/` 中的真实 trace 数据（禁止合成 mock 截图/演示）。
 6. 编码前必须执行 pre-work checklist，开 PR 前必须执行 pre-PR checklist。
 7. 不要留下仅本地存在的工作；你必须执行 `git add`、`git commit` 和 `git push`。
