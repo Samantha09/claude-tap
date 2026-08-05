@@ -21,6 +21,7 @@ classifiers = [
 dependencies = [
     "aiohttp==3.14.1",
     "backports-zstd>=1.0; python_version < '3.14'",
+    "certifi>=2024.2.2",
     "cryptography>=42.0",
 ]
 

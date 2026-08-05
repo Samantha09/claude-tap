@@ -73,6 +73,7 @@ from claude_tap.shared_dashboard import (
 from claude_tap.trace import TraceWriter, create_trace_writer
 from claude_tap.trace_log_handler import SQLiteLogHandler
 from claude_tap.trace_store import TraceStore, get_trace_store, resolve_db_path
+from claude_tap.upstream import build_upstream_ssl_context
 
 # Force UTF-8 + line-buffered stdout/stderr so emoji output works on Windows
 # consoles (GBK/cp936) and `uv tool` doesn't fully buffer our progress prints.
@@ -408,7 +409,8 @@ async def async_main(args: argparse.Namespace):
         loopback_host = _loopback_target_host(args.target)
         if loopback_host is not None:
             _extend_no_proxy(os.environ, (loopback_host,))
-        session = aiohttp.ClientSession(auto_decompress=False, trust_env=True)
+        connector = aiohttp.TCPConnector(ssl=build_upstream_ssl_context())
+        session = aiohttp.ClientSession(connector=connector, auto_decompress=False, trust_env=True)
 
         if args.proxy_mode == "forward":
             assert ca_cert_path is not None

@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import ssl
+import sys
 
 import pytest
 
 from claude_tap.upstream import (
     KNOWN_UPSTREAM_ENDPOINT_PATHS,
+    build_upstream_ssl_context,
     build_upstream_url,
     format_upstream_error,
     is_ssl_certificate_error,
@@ -90,3 +92,35 @@ def test_format_upstream_error_keeps_non_ssl_error_short() -> None:
     assert format_upstream_error(exc, target_url="http://example.test", upstream_url="http://example.test") == (
         "connection refused"
     )
+
+
+def test_build_upstream_ssl_context_loads_certifi_bundle(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The context must trust real CAs even when the interpreter's OpenSSL
+    default CA paths are empty (e.g. python.org macOS builds without
+    "Install Certificates.command")."""
+    import certifi
+
+    monkeypatch.delenv("SSL_CERT_FILE", raising=False)
+
+    ctx = build_upstream_ssl_context()
+
+    assert isinstance(ctx, ssl.SSLContext)
+    expected = ssl.create_default_context(cafile=certifi.where())
+    assert {c["subject"] for c in ctx.get_ca_certs()} == {c["subject"] for c in expected.get_ca_certs()}
+    assert len(ctx.get_ca_certs()) > 0
+
+
+def test_build_upstream_ssl_context_defers_to_ssl_cert_file_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """SSL_CERT_FILE is the documented escape hatch for corporate proxies;
+    when set, leave context creation to OpenSSL so the env var keeps working."""
+    monkeypatch.setenv("SSL_CERT_FILE", "/etc/ssl/cert.pem")
+
+    assert build_upstream_ssl_context() is None
+
+
+def test_build_upstream_ssl_context_without_certifi_returns_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without certifi installed, fall back to aiohttp's default behavior."""
+    monkeypatch.delenv("SSL_CERT_FILE", raising=False)
+    monkeypatch.setitem(sys.modules, "certifi", None)
+
+    assert build_upstream_ssl_context() is None

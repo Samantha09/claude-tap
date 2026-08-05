@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import ssl
 from urllib.parse import urlsplit, urlunsplit
 
@@ -15,6 +16,28 @@ KNOWN_UPSTREAM_ENDPOINT_PATHS = (
     "/v1/completions",
     "/completions",
 )
+
+
+def build_upstream_ssl_context() -> ssl.SSLContext | None:
+    """Return an SSL context for upstream connections, or None to use aiohttp's default.
+
+    aiohttp builds its default context from the interpreter's OpenSSL default
+    paths. On python.org macOS builds those paths are empty unless the user ran
+    "Install Certificates.command", which makes every upstream HTTPS call fail
+    with CERTIFICATE_VERIFY_FAILED. Loading certifi's bundle explicitly avoids
+    depending on the interpreter's OpenSSL setup.
+
+    When SSL_CERT_FILE is set (the documented escape hatch for corporate
+    proxies), return None so OpenSSL keeps honoring it.
+    """
+
+    if os.environ.get("SSL_CERT_FILE"):
+        return None
+    try:
+        import certifi
+    except ImportError:
+        return None
+    return ssl.create_default_context(cafile=certifi.where())
 
 
 def build_upstream_url(target_url: str, forward_path: str) -> str:
