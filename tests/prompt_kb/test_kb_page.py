@@ -16,3 +16,11 @@ def test_kb_i18n_entries_zh_source():
     assert '"kb_view"' in html or "kb_view" in html
     # zh-CN entries exist alongside en fallbacks
     assert "Prompt 知识库" in html
+
+
+def test_refresh_sessions_preserves_kb_view():
+    html = read_dashboard_template()
+    # SSE/polling refreshes must not bounce the user off the KB tab.
+    assert 'state.view !== "detail" && state.view !== "kb"' in html
+    assert 'state.view !== "kb" && (!preserveSelection || !stillVisible)' in html
+    assert '} else if (state.view !== "kb") {' in html

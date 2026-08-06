@@ -1732,12 +1732,12 @@ function updateTracePathBar(session = null) {
 	      state.view = "detail";
 	    } else {
 	      const stillVisible = visible.some(session => session.id === state.selectedSessionId);
-      if (!preserveSelection || !stillVisible) {
+      if (state.view !== "kb" && (!preserveSelection || !stillVisible)) {
         state.selectedSessionId = null;
         state.view = "list";
       }
     }
-    if (state.view !== "detail") {
+    if (state.view !== "detail" && state.view !== "kb") {
       state.selectedSessionId = null;
       state.view = "list";
     }
@@ -1753,7 +1753,7 @@ function updateTracePathBar(session = null) {
       } else if (selected) {
         updateDetailSessionSummary(selected);
       }
-    } else {
+    } else if (state.view !== "kb") {
       showListView();
     }
   } finally {
