@@ -49,14 +49,14 @@ def kb_main(argv: list[str]) -> int:
         print(f"indexed={result['indexed']} failed={result['failed']}")
         return 0
     try:
-        results = search(store, embedder, args.query,
-                         client=args.client, kind=args.kind, limit=args.limit)
+        results = search(store, embedder, args.query, client=args.client, kind=args.kind, limit=args.limit)
     except ReindexRequired as exc:
         print(str(exc), file=sys.stderr)
         return 3
     for rank, group in enumerate(results, 1):
-        print(f"[{rank}] {group.client} / {group.model} "
-              f"(first seen {group.first_seen}, sessions {group.session_count})")
+        print(
+            f"[{rank}] {group.client} / {group.model} (first seen {group.first_seen}, sessions {group.session_count})"
+        )
         for hit in group.hits:
             print(f"    {hit.kind} {hit.title} score={hit.score:.3f}")
             print(f"    {hit.text[:200]}")

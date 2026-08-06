@@ -13,8 +13,13 @@ pytestmark = pytest.mark.asyncio
 def seeded_kb(trace_db, monkeypatch):
     store = KbStore.default()
     snap_id, _ = store.upsert_snapshot(
-        content_hash="h", client="codex", provider="openai", model="gpt-5",
-        system_prompt="s", developer_prompt="", tools_json="[]",
+        content_hash="h",
+        client="codex",
+        provider="openai",
+        model="gpt-5",
+        system_prompt="s",
+        developer_prompt="",
+        tools_json="[]",
         seen_at="2026-08-01T00:00:00Z",
     )
     store.replace_chunks(snap_id, [("tool", "shell", "sandbox shell command runner")])

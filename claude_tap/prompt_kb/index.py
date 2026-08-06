@@ -53,8 +53,7 @@ def ensure_embedder_meta(store: KbStore, embedder: Embedder) -> None:
     store.set_meta("embedding_dim", str(embedder.dimension))
 
 
-def run_index_loop(*, interval_seconds: float = 30.0,
-                   stop_event: threading.Event | None = None) -> None:
+def run_index_loop(*, interval_seconds: float = 30.0, stop_event: threading.Event | None = None) -> None:
     """Background entry point for the dashboard process.
 
     Owns its own KbStore/TraceStore connections. Embedder creation is retried

@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS kb_meta (
 );
 """
 
+
 def default_db_path() -> Path:
     # Reuse the trace DB resolution (CLOUDTAP_DB / XDG_DATA_HOME) so the KB
     # always lands next to the trace database, including in tests.
@@ -70,9 +71,7 @@ class KbStore:
         """Idempotent column additions for databases created by older builds."""
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(kb_chunks)")}
         if "attempts" not in columns:
-            conn.execute(
-                "ALTER TABLE kb_chunks ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0"
-            )
+            conn.execute("ALTER TABLE kb_chunks ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0")
 
     @classmethod
     def default(cls) -> "KbStore":
@@ -83,9 +82,18 @@ class KbStore:
         conn.row_factory = sqlite3.Row
         return conn
 
-    def upsert_snapshot(self, *, content_hash: str, client: str, provider: str,
-                        model: str, system_prompt: str, developer_prompt: str,
-                        tools_json: str, seen_at: str) -> tuple[int, bool]:
+    def upsert_snapshot(
+        self,
+        *,
+        content_hash: str,
+        client: str,
+        provider: str,
+        model: str,
+        system_prompt: str,
+        developer_prompt: str,
+        tools_json: str,
+        seen_at: str,
+    ) -> tuple[int, bool]:
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT id, session_count FROM kb_snapshots WHERE client=? AND model=? AND content_hash=?",
@@ -102,8 +110,7 @@ class KbStore:
                    (content_hash, client, provider, model, system_prompt, developer_prompt,
                     tools_json, first_seen, last_seen)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (content_hash, client, provider, model, system_prompt,
-                 developer_prompt, tools_json, seen_at, seen_at),
+                (content_hash, client, provider, model, system_prompt, developer_prompt, tools_json, seen_at, seen_at),
             )
             return int(cur.lastrowid), True
 
@@ -117,9 +124,7 @@ class KbStore:
 
     def is_source_processed(self, session_id: str) -> bool:
         with self._connect() as conn:
-            row = conn.execute(
-                "SELECT 1 FROM kb_sources WHERE session_id=?", (session_id,)
-            ).fetchone()
+            row = conn.execute("SELECT 1 FROM kb_sources WHERE session_id=?", (session_id,)).fetchone()
             return row is not None
 
     def record_source(self, session_id: str, snapshot_id: int | None, processed_at: str) -> None:
@@ -156,8 +161,7 @@ class KbStore:
         remain visible via stats()."""
         with self._connect() as conn:
             cur = conn.execute(
-                "UPDATE kb_chunks SET index_state='pending' "
-                "WHERE index_state='failed' AND attempts < ?",
+                "UPDATE kb_chunks SET index_state='pending' WHERE index_state='failed' AND attempts < ?",
                 (self.MAX_ATTEMPTS,),
             )
             return cur.rowcount
@@ -173,9 +177,7 @@ class KbStore:
 
     def reset_embeddings(self) -> int:
         with self._connect() as conn:
-            cur = conn.execute(
-                "UPDATE kb_chunks SET embedding=NULL, index_state='pending', attempts=0"
-            )
+            cur = conn.execute("UPDATE kb_chunks SET embedding=NULL, index_state='pending', attempts=0")
             return cur.rowcount
 
     def get_meta(self, key: str) -> str | None:
@@ -185,15 +187,11 @@ class KbStore:
 
     def set_meta(self, key: str, value: str) -> None:
         with self._connect() as conn:
-            conn.execute(
-                "INSERT OR REPLACE INTO kb_meta (key, value) VALUES (?, ?)", (key, value)
-            )
+            conn.execute("INSERT OR REPLACE INTO kb_meta (key, value) VALUES (?, ?)", (key, value))
 
     def get_snapshot(self, snapshot_id: int) -> sqlite3.Row | None:
         with self._connect() as conn:
-            return conn.execute(
-                "SELECT * FROM kb_snapshots WHERE id=?", (snapshot_id,)
-            ).fetchone()
+            return conn.execute("SELECT * FROM kb_snapshots WHERE id=?", (snapshot_id,)).fetchone()
 
     def timeline(self, client: str, model: str) -> list[sqlite3.Row]:
         with self._connect() as conn:
@@ -209,9 +207,7 @@ class KbStore:
             chunks = conn.execute("SELECT COUNT(*) c FROM kb_chunks").fetchone()["c"]
             by_state = {
                 row["index_state"]: row["c"]
-                for row in conn.execute(
-                    "SELECT index_state, COUNT(*) c FROM kb_chunks GROUP BY index_state"
-                )
+                for row in conn.execute("SELECT index_state, COUNT(*) c FROM kb_chunks GROUP BY index_state")
             }
             return {
                 "snapshots": int(snapshots),

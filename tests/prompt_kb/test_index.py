@@ -1,14 +1,19 @@
 import array
 
-from claude_tap.prompt_kb.index import index_pending, rebuild_index, ensure_embedder_meta
+from claude_tap.prompt_kb.index import ensure_embedder_meta, index_pending, rebuild_index
 from claude_tap.prompt_kb.store import KbStore
 from tests.prompt_kb.fake_embedder import FakeEmbedder
 
 
 def _seed(store: KbStore) -> None:
     snap_id, _ = store.upsert_snapshot(
-        content_hash="h", client="codex", provider="openai", model="gpt-5",
-        system_prompt="s", developer_prompt="", tools_json="[]",
+        content_hash="h",
+        client="codex",
+        provider="openai",
+        model="gpt-5",
+        system_prompt="s",
+        developer_prompt="",
+        tools_json="[]",
         seen_at="2026-08-01T00:00:00Z",
     )
     store.replace_chunks(snap_id, [("tool", "a", "alpha text"), ("tool", "b", "beta text")])

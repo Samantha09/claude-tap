@@ -19,8 +19,9 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def extract_session(store: KbStore, *, session_id: str, client: str,
-                    records: list[dict[str, Any]], processed_at: str) -> int | None:
+def extract_session(
+    store: KbStore, *, session_id: str, client: str, records: list[dict[str, Any]], processed_at: str
+) -> int | None:
     try:
         snapshot = snapshot_from_records(records)
     except (ValueError, KeyError, TypeError) as exc:
@@ -28,8 +29,7 @@ def extract_session(store: KbStore, *, session_id: str, client: str,
         store.record_source(session_id, None, processed_at)
         return None
     tools_json = json.dumps(
-        [{"name": t.name, "description": t.description, "schema": t.schema}
-         for t in snapshot.tools],
+        [{"name": t.name, "description": t.description, "schema": t.schema} for t in snapshot.tools],
         ensure_ascii=False,
     )
     snapshot_id, created = store.upsert_snapshot(
@@ -44,9 +44,7 @@ def extract_session(store: KbStore, *, session_id: str, client: str,
     )
     if created:
         chunks = chunk_snapshot(snapshot)
-        store.replace_chunks(
-            snapshot_id, [(c.kind, c.title, c.text) for c in chunks]
-        )
+        store.replace_chunks(snapshot_id, [(c.kind, c.title, c.text) for c in chunks])
     store.record_source(session_id, snapshot_id, processed_at)
     return snapshot_id
 
@@ -67,9 +65,11 @@ def extract_unprocessed(store: KbStore, trace: TraceStore, *, limit: int = 50) -
         try:
             records = trace.load_records(session_id)
             snap_id = extract_session(
-                store, session_id=session_id,
+                store,
+                session_id=session_id,
                 client=str(row["client"] or "unknown"),
-                records=records, processed_at=_now(),
+                records=records,
+                processed_at=_now(),
             )
         except Exception as exc:
             # Do not record_source: the session stays retriable on the next pass.

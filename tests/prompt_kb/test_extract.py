@@ -15,8 +15,9 @@ def _anthropic_record(turn: int = 1) -> dict:
                 "model": "claude-test",
                 "system": "# Rules\nbe helpful",
                 "messages": [{"role": "user", "content": "hi"}],
-                "tools": [{"name": "shell", "description": "run commands",
-                           "input_schema": {"properties": {"cmd": {}}}}],
+                "tools": [
+                    {"name": "shell", "description": "run commands", "input_schema": {"properties": {"cmd": {}}}}
+                ],
             },
         },
         "response": {"status": 200, "body": "", "sse_events": []},
@@ -26,8 +27,11 @@ def _anthropic_record(turn: int = 1) -> dict:
 def test_extract_session_stores_snapshot_and_chunks(trace_db):
     store = KbStore.default()
     snap_id = extract_session(
-        store, session_id="s1", client="claude-code",
-        records=[_anthropic_record()], processed_at="2026-08-01T00:00:10Z",
+        store,
+        session_id="s1",
+        client="claude-code",
+        records=[_anthropic_record()],
+        processed_at="2026-08-01T00:00:10Z",
     )
     assert snap_id is not None
     row = store.get_snapshot(snap_id)
@@ -41,7 +45,9 @@ def test_extract_session_stores_snapshot_and_chunks(trace_db):
 def test_extract_session_marks_empty_when_no_prompt(trace_db):
     store = KbStore.default()
     snap_id = extract_session(
-        store, session_id="s2", client="codex",
+        store,
+        session_id="s2",
+        client="codex",
         records=[{"request": {"path": "/health", "body": {}}}],
         processed_at="2026-08-01T00:00:10Z",
     )

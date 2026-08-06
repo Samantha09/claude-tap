@@ -30,7 +30,8 @@ from claude_tap.dashboard import (
 from claude_tap.history import delete_trace_history, migrate_legacy_traces
 from claude_tap.prompt_kb.embed import EmbedderUnavailable, create_embedder, load_config
 from claude_tap.prompt_kb.index import ensure_embedder_meta, rebuild_index, run_index_loop
-from claude_tap.prompt_kb.search import ReindexRequired, search as kb_search
+from claude_tap.prompt_kb.search import ReindexRequired
+from claude_tap.prompt_kb.search import search as kb_search
 from claude_tap.prompt_kb.store import KbStore
 from claude_tap.shared_dashboard import CLAUDE_TAP_VERSION, dashboard_url
 from claude_tap.trace_store import get_trace_store, resolve_db_path
@@ -573,7 +574,8 @@ class LiveViewerServer:
     @staticmethod
     def _kb_unavailable_response(exc: Exception) -> web.Response:
         return web.json_response(
-            {"error": "rag_extra_missing", "hint": str(exc)}, status=501,
+            {"error": "rag_extra_missing", "hint": str(exc)},
+            status=501,
         )
 
     async def _handle_kb_search(self, request: web.Request) -> web.Response:
@@ -586,7 +588,9 @@ class LiveViewerServer:
             return self._kb_unavailable_response(exc)
         try:
             results = kb_search(
-                KbStore.default(), embedder, query,
+                KbStore.default(),
+                embedder,
+                query,
                 client=request.query.get("client") or None,
                 kind=request.query.get("kind") or None,
                 limit=int(request.query.get("limit", "10")),
@@ -596,37 +600,49 @@ class LiveViewerServer:
             return self._kb_unavailable_response(exc)
         except ReindexRequired as exc:
             return web.json_response(
-                {"error": "reindex_required", "hint": str(exc)}, status=409,
+                {"error": "reindex_required", "hint": str(exc)},
+                status=409,
             )
-        return web.json_response({"results": [
+        return web.json_response(
             {
-                "snapshot_id": group.snapshot_id,
-                "client": group.client,
-                "model": group.model,
-                "first_seen": group.first_seen,
-                "last_seen": group.last_seen,
-                "session_count": group.session_count,
-                "hits": [
-                    {"kind": h.kind, "title": h.title, "text": h.text, "score": h.score}
-                    for h in group.hits
-                ],
+                "results": [
+                    {
+                        "snapshot_id": group.snapshot_id,
+                        "client": group.client,
+                        "model": group.model,
+                        "first_seen": group.first_seen,
+                        "last_seen": group.last_seen,
+                        "session_count": group.session_count,
+                        "hits": [
+                            {"kind": h.kind, "title": h.title, "text": h.text, "score": h.score} for h in group.hits
+                        ],
+                    }
+                    for group in results
+                ]
             }
-            for group in results
-        ]})
+        )
 
     async def _handle_kb_status(self, request: web.Request) -> web.Response:
         store = KbStore.default()
         try:
             embedder = self._kb_embedder()
         except EmbedderUnavailable as exc:
-            return web.json_response({
-                "available": False, "stats": store.stats(),
-                "embedder": None, "hint": str(exc),
-            })
-        return web.json_response({
-            "available": True, "stats": store.stats(),
-            "embedder": embedder.name, "hint": None,
-        })
+            return web.json_response(
+                {
+                    "available": False,
+                    "stats": store.stats(),
+                    "embedder": None,
+                    "hint": str(exc),
+                }
+            )
+        return web.json_response(
+            {
+                "available": True,
+                "stats": store.stats(),
+                "embedder": embedder.name,
+                "hint": None,
+            }
+        )
 
     async def _handle_kb_reindex(self, request: web.Request) -> web.Response:
         try:
@@ -646,16 +662,23 @@ class LiveViewerServer:
     async def _handle_kb_timeline(self, request: web.Request) -> web.Response:
         store = KbStore.default()
         versions = store.timeline(
-            request.query.get("client", ""), request.query.get("model", ""),
+            request.query.get("client", ""),
+            request.query.get("model", ""),
         )
-        return web.json_response({"versions": [
+        return web.json_response(
             {
-                "id": row["id"], "content_hash": row["content_hash"],
-                "first_seen": row["first_seen"], "last_seen": row["last_seen"],
-                "session_count": row["session_count"],
+                "versions": [
+                    {
+                        "id": row["id"],
+                        "content_hash": row["content_hash"],
+                        "first_seen": row["first_seen"],
+                        "last_seen": row["last_seen"],
+                        "session_count": row["session_count"],
+                    }
+                    for row in versions
+                ]
             }
-            for row in versions
-        ]})
+        )
 
     async def _handle_sessions(self, request: web.Request) -> web.Response:
         """Return trace history sessions."""

@@ -4,8 +4,11 @@ from claude_tap.prompt_snapshot import PromptSnapshot, PromptTool
 
 def _snapshot(system="", developer="", tools=()):
     return PromptSnapshot(
-        provider="anthropic", model="claude", system_prompt=system,
-        developer_prompt=developer, tools=tools,
+        provider="anthropic",
+        model="claude",
+        system_prompt=system,
+        developer_prompt=developer,
+        tools=tools,
     )
 
 

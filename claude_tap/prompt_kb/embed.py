@@ -61,8 +61,7 @@ class LocalEmbedder:
             from sentence_transformers import SentenceTransformer
         except ImportError as exc:
             raise EmbedderUnavailable(
-                "sentence-transformers is not installed; "
-                "install the optional dependency: pip install 'claude-tap[rag]'"
+                "sentence-transformers is not installed; install the optional dependency: pip install 'claude-tap[rag]'"
             ) from exc
         try:
             self._model = SentenceTransformer(model_name)
@@ -71,9 +70,7 @@ class LocalEmbedder:
             # Model download/load failures (network, TLS, disk, corrupt cache)
             # must surface as EmbedderUnavailable so callers return the 501
             # embedder_unavailable hint instead of a bare 500.
-            raise EmbedderUnavailable(
-                f"failed to load local embedding model {model_name!r}: {exc}"
-            ) from exc
+            raise EmbedderUnavailable(f"failed to load local embedding model {model_name!r}: {exc}") from exc
         self.name = f"local:{model_name}"
 
     def embed(self, texts: list[str]) -> list[list[float]]:
@@ -114,9 +111,7 @@ def create_embedder(config: KbConfig) -> Embedder:
             raise EmbedderUnavailable("api embedder requires api_base and api_model")
         api_key = os.environ.get(config.api_key_env, "")
         if not api_key:
-            raise EmbedderUnavailable(
-                f"api embedder requires the {config.api_key_env} environment variable"
-            )
+            raise EmbedderUnavailable(f"api embedder requires the {config.api_key_env} environment variable")
         return ApiEmbedder(api_base=config.api_base, api_model=config.api_model, api_key=api_key)
     return LocalEmbedder(config.local_model)
 

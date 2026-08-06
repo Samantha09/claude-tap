@@ -25,8 +25,7 @@ class Chunk:
 
 def chunk_snapshot(snapshot: PromptSnapshot) -> list[Chunk]:
     chunks: list[Chunk] = []
-    for label, prompt in (("system", snapshot.system_prompt),
-                          ("developer", snapshot.developer_prompt)):
+    for label, prompt in (("system", snapshot.system_prompt), ("developer", snapshot.developer_prompt)):
         if prompt and prompt.strip():
             chunks.extend(_split_prompt(prompt))
     chunks.extend(_tool_chunk(tool) for tool in snapshot.tools)
@@ -59,8 +58,7 @@ def _heading_sections(text: str) -> list[tuple[str, str]]:
             current_lines.append(line)
     if current_lines or current_title:
         sections.append((current_title, current_lines))
-    return [(title, "\n".join(lines).strip()) for title, lines in sections
-            if "\n".join(lines).strip()]
+    return [(title, "\n".join(lines).strip()) for title, lines in sections if "\n".join(lines).strip()]
 
 
 def _merge_small(sections: list[tuple[str, str]]) -> list[tuple[str, str]]:
@@ -140,11 +138,14 @@ def content_hash(client: str, model: str, snapshot: PromptSnapshot) -> str:
         "system": _normalize_text(snapshot.system_prompt),
         "developer": _normalize_text(snapshot.developer_prompt),
         "tools": [
-            {"name": tool.name, "description": tool.description,
-             "params": _tool_param_names(tool.schema),
-             # Canonicalized schema internals so a schema change with an
-             # unchanged description still produces a new version hash.
-             "schema": json.dumps(tool.schema, ensure_ascii=False, sort_keys=True)}
+            {
+                "name": tool.name,
+                "description": tool.description,
+                "params": _tool_param_names(tool.schema),
+                # Canonicalized schema internals so a schema change with an
+                # unchanged description still produces a new version hash.
+                "schema": json.dumps(tool.schema, ensure_ascii=False, sort_keys=True),
+            }
             for tool in sorted(snapshot.tools, key=lambda t: t.name)
         ],
     }

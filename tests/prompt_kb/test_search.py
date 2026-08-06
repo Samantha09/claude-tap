@@ -2,22 +2,32 @@ import pytest
 
 numpy = pytest.importorskip("numpy")  # search depends on the [rag] extra
 
-from claude_tap.prompt_kb.index import ensure_embedder_meta, index_pending
-from claude_tap.prompt_kb.search import ReindexRequired, search
-from claude_tap.prompt_kb.store import KbStore
-from tests.prompt_kb.fake_embedder import FakeEmbedder
+from claude_tap.prompt_kb.index import ensure_embedder_meta, index_pending  # noqa: E402
+from claude_tap.prompt_kb.search import ReindexRequired, search  # noqa: E402
+from claude_tap.prompt_kb.store import KbStore  # noqa: E402
+from tests.prompt_kb.fake_embedder import FakeEmbedder  # noqa: E402
 
 
 def _seed(store: KbStore) -> None:
     a, _ = store.upsert_snapshot(
-        content_hash="ha", client="codex", provider="openai", model="gpt-5",
-        system_prompt="s", developer_prompt="", tools_json="[]",
+        content_hash="ha",
+        client="codex",
+        provider="openai",
+        model="gpt-5",
+        system_prompt="s",
+        developer_prompt="",
+        tools_json="[]",
         seen_at="2026-08-01T00:00:00Z",
     )
     store.replace_chunks(a, [("tool", "shell", "sandbox shell command runner")])
     b, _ = store.upsert_snapshot(
-        content_hash="hb", client="claude-code", provider="anthropic", model="claude",
-        system_prompt="s", developer_prompt="", tools_json="[]",
+        content_hash="hb",
+        client="claude-code",
+        provider="anthropic",
+        model="claude",
+        system_prompt="s",
+        developer_prompt="",
+        tools_json="[]",
         seen_at="2026-08-02T00:00:00Z",
     )
     store.replace_chunks(b, [("prompt_section", "Style", "write elegant prose")])
