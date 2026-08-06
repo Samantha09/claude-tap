@@ -64,12 +64,18 @@ def extract_unprocessed(store: KbStore, trace: TraceStore, *, limit: int = 50) -
             store.record_source(session_id, None, _now())
             skipped += 1
             continue
-        records = trace.load_records(session_id)
-        snap_id = extract_session(
-            store, session_id=session_id,
-            client=str(row["client"] or "unknown"),
-            records=records, processed_at=_now(),
-        )
+        try:
+            records = trace.load_records(session_id)
+            snap_id = extract_session(
+                store, session_id=session_id,
+                client=str(row["client"] or "unknown"),
+                records=records, processed_at=_now(),
+            )
+        except Exception as exc:
+            # Do not record_source: the session stays retriable on the next pass.
+            logger.warning("kb extraction failed for session %s: %s", session_id, exc)
+            skipped += 1
+            continue
         processed += 1
         if snap_id is not None:
             snapshots += 1

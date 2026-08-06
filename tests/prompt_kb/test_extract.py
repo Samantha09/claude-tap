@@ -1,3 +1,4 @@
+from claude_tap.prompt_kb import extract
 from claude_tap.prompt_kb.extract import extract_session, extract_unprocessed
 from claude_tap.prompt_kb.store import KbStore
 from claude_tap.trace_store import get_trace_store
@@ -56,3 +57,26 @@ def test_extract_unprocessed_walks_trace_store(trace_db):
     result = extract_unprocessed(store, trace)
     assert result == {"processed": 1, "snapshots": 1, "skipped": 0}
     assert extract_unprocessed(store, trace) == {"processed": 0, "snapshots": 0, "skipped": 0}
+
+
+def test_extract_unprocessed_continues_after_failure(trace_db, monkeypatch):
+    trace = get_trace_store()
+    good = trace.create_session(client="claude-code", proxy_mode="reverse")
+    trace.append_record(good, _anthropic_record())
+    bad = trace.create_session(client="claude-code", proxy_mode="reverse")
+    trace.append_record(bad, _anthropic_record(turn=2))
+    store = KbStore.default()
+
+    real_extract_session = extract.extract_session
+
+    def flaky_extract_session(store, *, session_id, **kwargs):
+        if session_id == bad:
+            raise RuntimeError("boom")
+        return real_extract_session(store, session_id=session_id, **kwargs)
+
+    monkeypatch.setattr(extract, "extract_session", flaky_extract_session)
+    result = extract.extract_unprocessed(store, trace)
+    assert result == {"processed": 1, "snapshots": 1, "skipped": 1}
+    # The failed session is not recorded, so it is retried on the next pass.
+    assert store.is_source_processed(bad) is False
+    assert store.is_source_processed(good) is True
