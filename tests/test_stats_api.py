@@ -20,6 +20,27 @@ def stats_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     return store
 
 
+async def test_dashboard_html_contains_stats_view(stats_server):
+    server = LiveViewerServer(port=0, dashboard_mode=True)
+    port = await server.start()
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"http://127.0.0.1:{port}/") as resp:
+                assert resp.status == 200
+                html = await resp.text()
+                assert 'id="stats-view"' in html
+                assert 'data-view="stats"' in html
+                assert 'id="stats-daily"' in html
+                assert 'id="stats-by-project"' in html
+                assert 'view_stats: "Stats"' in html
+                assert 'view_stats: "统计"' in html
+                # The view toggle must live outside #list-view so it stays
+                # reachable while the stats view hides the session list.
+                assert html.index('class="view-toggle"') < html.index('id="list-view"')
+    finally:
+        await server.stop()
+
+
 async def test_api_stats_returns_aggregates(stats_server):
     server = LiveViewerServer(port=0, dashboard_mode=True)
     port = await server.start()

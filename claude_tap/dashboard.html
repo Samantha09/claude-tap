@@ -211,6 +211,47 @@ body.detail-route .main {
   font-weight: 600;
   letter-spacing: .02em;
 }
+.view-toggle { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; flex-shrink: 0; }
+.view-toggle-btn { border: none; background: var(--bg-card); color: var(--text-secondary); font-size: 12px; padding: 4px 12px; transition: all .15s; }
+.view-toggle-btn.active { background: var(--blue); color: #fff; }
+.stats-view { display: flex; flex-direction: column; gap: 14px; }
+.stats-hero { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+.stat-card { background: var(--bg-card); border: 1px solid #cfd8e7; border-radius: 8px; box-shadow: var(--shadow-sm); padding: 16px 18px; border-top: 3px solid var(--blue); }
+.stat-card.accent-indigo { border-top-color: var(--indigo); }
+.stat-card.accent-red { border-top-color: var(--red); }
+.stat-card.accent-purple { border-top-color: var(--purple); }
+[data-theme="dark"] .stat-card { border-left-color: var(--border); border-right-color: var(--border); border-bottom-color: var(--border); }
+.stat-card-label { font-family: var(--mono); font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--text-tertiary); }
+.stat-card-value { margin-top: 8px; font-family: var(--mono); font-size: 24px; font-weight: 700; line-height: 1; color: var(--text); }
+.stat-card-value.is-error { color: var(--red); }
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+.stats-panel { background: var(--bg-card); border: 1px solid #cfd8e7; border-radius: 8px; box-shadow: var(--shadow-sm); padding: 16px 18px; }
+[data-theme="dark"] .stats-panel { border-color: var(--border); }
+.stats-title { font-family: var(--mono); font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--text-tertiary); margin-bottom: 12px; }
+.token-bar { display: flex; height: 14px; border-radius: 999px; overflow: hidden; background: var(--bg-hover); }
+.token-seg { display: block; height: 100%; min-width: 0; }
+.token-seg.seg-input { background: var(--blue); }
+.token-seg.seg-output { background: var(--green); }
+.token-seg.seg-cache-read { background: var(--purple); }
+.token-seg.seg-cache-create { background: var(--amber); }
+.token-legend { display: flex; flex-wrap: wrap; gap: 10px 22px; margin-top: 14px; }
+.token-item { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--text-secondary); }
+.token-dot { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; }
+.token-item b { font-family: var(--mono); font-weight: 600; color: var(--text); }
+.token-pct { font-family: var(--mono); font-size: 11px; color: var(--text-tertiary); }
+.stats-daily { display: flex; align-items: flex-end; justify-content: center; gap: 8px; height: 150px; padding: 4px 4px 0; border-bottom: 1px solid var(--border); }
+.stats-day { flex: 0 1 64px; display: flex; flex-direction: column; justify-content: flex-end; align-items: stretch; gap: 5px; min-width: 22px; height: 100%; }
+.stats-day-value { font-family: var(--mono); font-size: 10px; color: var(--text-tertiary); text-align: center; white-space: nowrap; overflow: hidden; }
+.stats-day-bar { background: linear-gradient(180deg, #60a5fa, var(--blue)); border-radius: 4px 4px 0 0; min-height: 2px; transition: filter .15s; }
+.stats-day:hover .stats-day-bar { filter: brightness(.88); }
+.stats-day-label { font-family: var(--mono); font-size: 10px; color: var(--text-tertiary); text-align: center; white-space: nowrap; overflow: hidden; padding-bottom: 4px; }
+.dist-row { display: flex; align-items: center; gap: 10px; padding: 5px 6px; margin: 0 -6px; font-size: 12px; border-radius: var(--radius-sm); }
+.dist-row:hover { background: var(--bg-hover); }
+.dist-label { flex: 0 0 34%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-weight: 500; }
+.dist-bar-wrap { flex: 1; background: var(--bg-active); border-radius: 999px; height: 8px; overflow: hidden; }
+.dist-bar { display: block; height: 100%; background: linear-gradient(90deg, var(--blue), #60a5fa); border-radius: 999px; }
+.dist-value { flex: 0 0 104px; text-align: right; font-family: var(--mono); color: var(--text-secondary); font-size: 11px; }
+.stats-empty { color: var(--text-tertiary); font-size: 12px; padding: 8px 0; }
 .dashboard-load-status {
   display: inline-flex;
   align-items: center;
@@ -958,6 +999,7 @@ pre {
 	  .history-actions { justify-content: flex-start; }
 	  .bulk-edit-bar { flex-wrap: wrap; }
   .overview-card { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+  .stats-hero { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .table-scroll { max-height: none; }
   .detail-page-head { align-items: flex-start; }
   .viewer-frame-wrap { height: 78vh; min-height: 520px; }
@@ -981,6 +1023,10 @@ pre {
     <div class="stat-group"><span data-i18n="stats_sessions">Sessions</span> <span class="stat-val" id="stat-sessions">0</span></div>
     <div class="stat-group"><span data-i18n="stats_records">Records</span> <span class="stat-val" id="stat-records">0</span></div>
     <div class="live-status"><span id="live-label">Watching</span></div>
+  </div>
+  <div class="view-toggle" role="tablist">
+    <button class="view-toggle-btn active" data-view="list" role="tab" data-i18n="view_sessions">Sessions</button>
+    <button class="view-toggle-btn" data-view="stats" role="tab" data-i18n="view_stats">Stats</button>
   </div>
   <button class="theme-toggle" id="theme-toggle" title="Toggle dark mode" data-i18n-title="theme_toggle">&#9790;</button>
   <select class="lang-select" id="lang-select" title="Language" data-i18n-title="language">
@@ -1077,6 +1123,34 @@ pre {
 	      </div>
 	      <div id="session-pagination" class="session-pagination hidden"></div>
 	    </section>
+  </section>
+
+  <section id="stats-view" class="stats-view hidden" aria-label="Statistics">
+    <div class="stats-hero">
+      <section class="stat-card"><div class="stat-card-label" data-i18n="stats_sessions">Sessions</div><div class="stat-card-value" id="stats-m-sessions">0</div></section>
+      <section class="stat-card accent-indigo"><div class="stat-card-label" data-i18n="stats_records">Records</div><div class="stat-card-value" id="stats-m-records">0</div></section>
+      <section class="stat-card accent-red"><div class="stat-card-label" data-i18n="stats_errors">Errors</div><div class="stat-card-value" id="stats-m-errors">0</div></section>
+      <section class="stat-card accent-purple"><div class="stat-card-label" data-i18n="metric_total_tokens">Total Tokens</div><div class="stat-card-value" id="stats-m-tokens">0</div></section>
+    </div>
+    <section class="stats-panel">
+      <h2 class="stats-title" data-i18n="stats_token_breakdown">Token breakdown</h2>
+      <div class="token-bar" id="stats-token-bar"></div>
+      <div class="token-legend">
+        <span class="token-item"><span class="token-dot" style="background:var(--blue)"></span><span data-i18n="stats_input_tokens">Input</span> <b id="stats-m-input">0</b> <span class="token-pct" id="stats-pct-input"></span></span>
+        <span class="token-item"><span class="token-dot" style="background:var(--green)"></span><span data-i18n="stats_output_tokens">Output</span> <b id="stats-m-output">0</b> <span class="token-pct" id="stats-pct-output"></span></span>
+        <span class="token-item"><span class="token-dot" style="background:var(--purple)"></span><span data-i18n="stats_cache_read">Cache read</span> <b id="stats-m-cache-read">0</b> <span class="token-pct" id="stats-pct-cache-read"></span></span>
+        <span class="token-item"><span class="token-dot" style="background:var(--amber)"></span><span data-i18n="stats_cache_create">Cache write</span> <b id="stats-m-cache-create">0</b> <span class="token-pct" id="stats-pct-cache-create"></span></span>
+      </div>
+    </section>
+    <section class="stats-panel">
+      <h2 class="stats-title" data-i18n="stats_daily">Daily trend</h2>
+      <div id="stats-daily" class="stats-daily"></div>
+    </section>
+    <div class="stats-grid">
+      <section class="stats-panel"><h2 class="stats-title" data-i18n="stats_by_client">By client</h2><div id="stats-by-client"></div></section>
+      <section class="stats-panel"><h2 class="stats-title" data-i18n="stats_by_model">By model</h2><div id="stats-by-model"></div></section>
+      <section class="stats-panel"><h2 class="stats-title" data-i18n="stats_by_project">By project</h2><div id="stats-by-project"></div></section>
+    </div>
   </section>
 
   <section id="detail-view" class="detail-view hidden">
@@ -1200,6 +1274,21 @@ const DASHBOARD_I18N = {
     dashboard: "Dashboard",
     trace_history_sessions: "trace history sessions",
     dashboard_title: "Conversation Log",
+    view_sessions: "Sessions",
+    view_stats: "Stats",
+    stats_errors: "Errors",
+    stats_input_tokens: "Input",
+    stats_output_tokens: "Output",
+    stats_cache_read: "Cache read",
+    stats_cache_create: "Cache write",
+    stats_daily: "Daily trend",
+    stats_token_breakdown: "Token breakdown",
+    stats_by_client: "By client",
+    stats_by_model: "By model",
+    stats_by_project: "By project",
+    stats_no_data: "No data",
+    stats_unknown_project: "Unknown project",
+    stats_unknown_client: "Unknown client",
     filter_date: "Date",
     filter_status: "Status",
     status_all: "All status",
@@ -1307,6 +1396,21 @@ const DASHBOARD_I18N = {
     dashboard: "面板",
     trace_history_sessions: "trace 历史会话",
     dashboard_title: "对话日志",
+    view_sessions: "会话列表",
+    view_stats: "统计",
+    stats_errors: "错误",
+    stats_input_tokens: "输入",
+    stats_output_tokens: "输出",
+    stats_cache_read: "缓存读",
+    stats_cache_create: "缓存写",
+    stats_daily: "每日趋势",
+    stats_token_breakdown: "Token 构成",
+    stats_by_client: "客户端分布",
+    stats_by_model: "模型分布",
+    stats_by_project: "项目分布",
+    stats_no_data: "暂无数据",
+    stats_unknown_project: "未知项目",
+    stats_unknown_client: "未知客户端",
     filter_date: "日期",
     filter_status: "状态",
     status_all: "全部状态",
@@ -2066,6 +2170,104 @@ function openSession(sessionId) {
   window.location.assign(sessionDetailUrl(sessionId));
 }
 
+function updateViewToggle() {
+  document.querySelectorAll(".view-toggle-btn").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.view === (state.view === "stats" ? "stats" : "list"));
+  });
+}
+
+function showStatsView() {
+  state.view = "stats";
+  document.body.classList.remove("detail-route");
+  $("#list-view").classList.add("hidden");
+  $("#detail-view").classList.add("hidden");
+  $("#stats-view").classList.remove("hidden");
+  updateViewToggle();
+  loadStats().catch(console.error);
+}
+
+async function loadStats() {
+  const params = new URLSearchParams();
+  if (state.date && state.date !== "all" && state.date !== "legacy") {
+    params.set("from", state.date);
+    params.set("to", state.date);
+  }
+  const resp = await fetch(`/api/stats${params.size ? `?${params}` : ""}`);
+  if (!resp.ok) throw new Error(`stats fetch failed: ${resp.status}`);
+  renderStats(await resp.json());
+}
+
+function renderStats(data) {
+  const totals = data.totals || {};
+  const totalTokens = (totals.input_tokens || 0) + (totals.output_tokens || 0)
+    + (totals.cache_read_tokens || 0) + (totals.cache_create_tokens || 0);
+  $("#stats-m-sessions").textContent = fmtNumber(totals.sessions);
+  $("#stats-m-records").textContent = fmtNumber(totals.records);
+  const errorsEl = $("#stats-m-errors");
+  errorsEl.textContent = fmtNumber(totals.errors);
+  errorsEl.classList.toggle("is-error", (totals.errors || 0) > 0);
+  $("#stats-m-tokens").textContent = fmtNumber(totalTokens);
+  const segments = [
+    ["input", totals.input_tokens || 0],
+    ["output", totals.output_tokens || 0],
+    ["cache-read", totals.cache_read_tokens || 0],
+    ["cache-create", totals.cache_create_tokens || 0],
+  ];
+  $("#stats-token-bar").innerHTML = totalTokens > 0
+    ? segments.filter(([, v]) => v > 0).map(([name, v]) =>
+      `<span class="token-seg seg-${name}" style="width:${(v / totalTokens * 100).toFixed(2)}%"></span>`).join("")
+    : "";
+  for (const [name, v] of segments) {
+    $(`#stats-m-${name}`).textContent = fmtNumber(v);
+    $(`#stats-pct-${name}`).textContent = totalTokens > 0 ? `${Math.round(v / totalTokens * 100)}%` : "";
+  }
+  renderDaily(data.daily || []);
+  renderDist("#stats-by-client", data.by_client || [], row => row.client || t("stats_unknown_client"));
+  renderDist("#stats-by-model", data.by_model || [], row => row.model);
+  renderDist("#stats-by-project", data.by_project || [],
+    row => row.cwd ? shortPath(row.cwd) : t("stats_unknown_project"),
+    row => row.cwd || t("stats_unknown_project"));
+}
+
+function shortPath(path) {
+  const parts = String(path || "").split("/").filter(Boolean);
+  return parts[parts.length - 1] || path || "";
+}
+
+function renderDaily(daily) {
+  const el = $("#stats-daily");
+  if (!daily.length) {
+    el.innerHTML = `<div class="stats-empty">${esc(t("stats_no_data"))}</div>`;
+    return;
+  }
+  const max = Math.max(...daily.map(d => d.tokens || 0), 1);
+  const showValues = daily.length <= 14;
+  el.innerHTML = daily.map(d => `
+    <div class="stats-day" title="${esc(d.date)} · ${fmtNumber(d.sessions)} ${esc(t("stats_sessions"))} · ${fmtNumber(d.tokens)} tokens">
+      ${showValues ? `<div class="stats-day-value">${d.tokens ? fmtNumber(d.tokens) : ""}</div>` : ""}
+      <div class="stats-day-bar" style="height:${Math.round((d.tokens || 0) / max * 100)}%"></div>
+      <div class="stats-day-label">${esc(String(d.date).slice(5))}</div>
+    </div>`).join("");
+}
+
+function renderDist(selector, rows, labelFn, titleFn) {
+  const el = $(selector);
+  if (!rows.length) {
+    el.innerHTML = `<div class="stats-empty">${esc(t("stats_no_data"))}</div>`;
+    return;
+  }
+  const max = Math.max(...rows.map(r => r.tokens || 0), 1);
+  const total = rows.reduce((sum, r) => sum + (r.tokens || 0), 0) || 1;
+  el.innerHTML = rows.map(r => {
+    const pct = Math.round((r.tokens || 0) / total * 100);
+    return `<div class="dist-row" title="${esc(titleFn ? titleFn(r) : labelFn(r))}">
+      <span class="dist-label">${esc(labelFn(r))}</span>
+      <span class="dist-bar-wrap"><span class="dist-bar" style="width:${Math.round((r.tokens || 0) / max * 100)}%"></span></span>
+      <span class="dist-value">${fmtNumber(r.tokens)} · ${pct}%</span>
+    </div>`;
+  }).join("");
+}
+
 function showListView() {
   state.view = "list";
   state.selectedSessionId = null;
@@ -2077,6 +2279,8 @@ function showListView() {
   document.body.classList.remove("detail-route");
   $("#list-view").classList.remove("hidden");
   $("#detail-view").classList.add("hidden");
+  $("#stats-view").classList.add("hidden");
+  updateViewToggle();
   updateTracePathBar();
   if (window.location.pathname.match(SESSION_DETAIL_ROUTE)) {
     history.replaceState(null, "", "/dashboard");
@@ -2086,6 +2290,7 @@ function showListView() {
 function showDetailView() {
   document.body.classList.add("detail-route");
   $("#list-view").classList.add("hidden");
+  $("#stats-view").classList.add("hidden");
   $("#detail-view").classList.remove("hidden");
 }
 
@@ -2473,6 +2678,7 @@ $("#search").addEventListener("input", event => {
 $("#date-filter").addEventListener("change", event => {
   state.date = event.target.value;
   refreshForFilters();
+  if (state.view === "stats") loadStats().catch(console.error);
 });
 
 $("#status-filter").addEventListener("change", event => {
@@ -2480,7 +2686,16 @@ $("#status-filter").addEventListener("change", event => {
   refreshForFilters();
 });
 
-	$("#refresh").addEventListener("click", () => refreshSessions({preserveSelection: true, refreshDetail: true}).catch(console.error));
+	$("#refresh").addEventListener("click", () => {
+  refreshSessions({preserveSelection: true, refreshDetail: true}).catch(console.error);
+  if (state.view === "stats") loadStats().catch(console.error);
+});
+document.querySelectorAll(".view-toggle-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    if (btn.dataset.view === "stats") showStatsView();
+    else showListView();
+  });
+});
 	$("#edit-sessions").addEventListener("click", () => setEditMode(!state.editMode));
 	$("#done-edit-sessions").addEventListener("click", () => setEditMode(false));
 	$("#select-all-sessions").addEventListener("change", event => toggleSelectAllVisible(event.target.checked));
