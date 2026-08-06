@@ -16,6 +16,9 @@ logger = logging.getLogger(__name__)
 def index_pending(store: KbStore, embedder: Embedder, *, batch_size: int = 32) -> dict:
     indexed = failed = 0
     meta_synced = False
+    # Retry chunks that failed in earlier rounds (e.g. transient embedder
+    # errors); chunks that hit the attempt cap stay failed.
+    store.requeue_failed()
     while True:
         batch = store.pending_chunks(batch_size)
         if not batch:

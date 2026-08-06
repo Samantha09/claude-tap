@@ -34,7 +34,8 @@ CREATE TABLE IF NOT EXISTS kb_chunks (
   title TEXT,
   text TEXT NOT NULL,
   embedding BLOB,
-  index_state TEXT NOT NULL DEFAULT 'pending'
+  index_state TEXT NOT NULL DEFAULT 'pending',
+  attempts INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_kb_chunks_state ON kb_chunks(index_state);
 CREATE TABLE IF NOT EXISTS kb_sources (
@@ -55,11 +56,23 @@ def default_db_path() -> Path:
 
 
 class KbStore:
+    MAX_ATTEMPTS = 3  # failed chunks are retried until this many embed attempts
+
     def __init__(self, db_path: Path):
         self._db_path = Path(db_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as conn:
             conn.executescript(SCHEMA)
+            self._migrate(conn)
+
+    @staticmethod
+    def _migrate(conn: sqlite3.Connection) -> None:
+        """Idempotent column additions for databases created by older builds."""
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(kb_chunks)")}
+        if "attempts" not in columns:
+            conn.execute(
+                "ALTER TABLE kb_chunks ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0"
+            )
 
     @classmethod
     def default(cls) -> "KbStore":
@@ -133,8 +146,21 @@ class KbStore:
     def mark_chunk_failed(self, chunk_id: int) -> None:
         with self._connect() as conn:
             conn.execute(
-                "UPDATE kb_chunks SET index_state='failed' WHERE id=?", (chunk_id,)
+                "UPDATE kb_chunks SET index_state='failed', attempts=attempts+1 WHERE id=?",
+                (chunk_id,),
             )
+
+    def requeue_failed(self) -> int:
+        """Move failed chunks below the attempt cap back to pending so the
+        next indexing round retries them; chunks at the cap stay failed and
+        remain visible via stats()."""
+        with self._connect() as conn:
+            cur = conn.execute(
+                "UPDATE kb_chunks SET index_state='pending' "
+                "WHERE index_state='failed' AND attempts < ?",
+                (self.MAX_ATTEMPTS,),
+            )
+            return cur.rowcount
 
     def indexed_chunks(self) -> list[sqlite3.Row]:
         with self._connect() as conn:
@@ -148,7 +174,7 @@ class KbStore:
     def reset_embeddings(self) -> int:
         with self._connect() as conn:
             cur = conn.execute(
-                "UPDATE kb_chunks SET embedding=NULL, index_state='pending'"
+                "UPDATE kb_chunks SET embedding=NULL, index_state='pending', attempts=0"
             )
             return cur.rowcount
 

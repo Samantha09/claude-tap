@@ -39,6 +39,46 @@ def test_index_pending_marks_failed_and_continues(trace_db):
     assert store.stats()["failed"] == 2
 
 
+class _FailOnceEmbedder(FakeEmbedder):
+    """Fails on the first embed call, then behaves normally."""
+
+    def __init__(self):
+        super().__init__()
+        self._failed = False
+
+    def embed(self, texts):
+        if not self._failed:
+            self._failed = True
+            raise RuntimeError("transient boom")
+        return super().embed(texts)
+
+
+def test_failed_chunk_retried_next_round(trace_db):
+    store = KbStore.default()
+    _seed(store)
+    embedder = _FailOnceEmbedder()
+    first = index_pending(store, embedder, batch_size=1)
+    assert first == {"indexed": 1, "failed": 1, "remaining": 0}
+    assert store.stats()["failed"] == 1
+    second = index_pending(store, embedder, batch_size=1)
+    assert second == {"indexed": 1, "failed": 0, "remaining": 0}
+    assert store.stats()["failed"] == 0
+    assert store.stats()["indexed"] == 2
+
+
+def test_chunk_failing_three_times_stays_failed(trace_db):
+    store = KbStore.default()
+    _seed(store)
+    for _ in range(3):
+        index_pending(store, _FlakyEmbedder(), batch_size=2)
+    stats = store.stats()
+    assert stats["failed"] == 2
+    # Beyond the retry cap the chunks are no longer requeued.
+    result = index_pending(store, FakeEmbedder(), batch_size=2)
+    assert result["indexed"] == 0
+    assert store.stats()["failed"] == 2
+
+
 def test_rebuild_resets_then_reindexes(trace_db):
     store = KbStore.default()
     _seed(store)

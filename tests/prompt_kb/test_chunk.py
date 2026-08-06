@@ -58,3 +58,13 @@ def test_content_hash_changes_with_content():
     assert content_hash("codex", "gpt-5", _snapshot(system="a")) != content_hash(
         "codex", "gpt-5", _snapshot(system="b")
     )
+
+
+def test_content_hash_changes_with_tool_schema_internals():
+    """Same name/description/param-names but different schema details must
+    produce different hashes so the version timeline sees the change."""
+    base = {"input_schema": {"type": "object", "properties": {"cmd": {"type": "string"}}}}
+    changed = {"input_schema": {"type": "object", "properties": {"cmd": {"type": "integer"}}}}
+    snap_a = _snapshot(tools=(PromptTool(name="shell", description="run", schema=base),))
+    snap_b = _snapshot(tools=(PromptTool(name="shell", description="run", schema=changed),))
+    assert content_hash("codex", "gpt-5", snap_a) != content_hash("codex", "gpt-5", snap_b)

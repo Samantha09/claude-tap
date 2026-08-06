@@ -141,7 +141,10 @@ def content_hash(client: str, model: str, snapshot: PromptSnapshot) -> str:
         "developer": _normalize_text(snapshot.developer_prompt),
         "tools": [
             {"name": tool.name, "description": tool.description,
-             "params": _tool_param_names(tool.schema)}
+             "params": _tool_param_names(tool.schema),
+             # Canonicalized schema internals so a schema change with an
+             # unchanged description still produces a new version hash.
+             "schema": json.dumps(tool.schema, ensure_ascii=False, sort_keys=True)}
             for tool in sorted(snapshot.tools, key=lambda t: t.name)
         ],
     }

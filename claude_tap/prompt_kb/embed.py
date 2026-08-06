@@ -64,9 +64,17 @@ class LocalEmbedder:
                 "sentence-transformers is not installed; "
                 "install the optional dependency: pip install 'claude-tap[rag]'"
             ) from exc
-        self._model = SentenceTransformer(model_name)
+        try:
+            self._model = SentenceTransformer(model_name)
+            self.dimension = int(self._model.get_sentence_embedding_dimension())
+        except Exception as exc:
+            # Model download/load failures (network, TLS, disk, corrupt cache)
+            # must surface as EmbedderUnavailable so callers return the 501
+            # embedder_unavailable hint instead of a bare 500.
+            raise EmbedderUnavailable(
+                f"failed to load local embedding model {model_name!r}: {exc}"
+            ) from exc
         self.name = f"local:{model_name}"
-        self.dimension = int(self._model.get_sentence_embedding_dimension())
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         vectors = self._model.encode(texts, normalize_embeddings=True)

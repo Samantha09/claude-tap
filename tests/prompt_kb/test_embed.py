@@ -36,6 +36,23 @@ def test_create_embedder_local_without_dependency(monkeypatch):
         create_embedder(KbConfig(embedder="local"))
 
 
+def test_local_embedder_wraps_model_load_errors(monkeypatch):
+    """Model download/load failures (network, TLS, disk) must surface as
+    EmbedderUnavailable, not leak as OSError 500s."""
+    import sys
+    import types
+
+    fake = types.ModuleType("sentence_transformers")
+
+    def _boom(model_name):
+        raise OSError("TLS handshake failed")
+
+    fake.SentenceTransformer = _boom
+    monkeypatch.setitem(sys.modules, "sentence_transformers", fake)
+    with pytest.raises(EmbedderUnavailable):
+        embed_mod.LocalEmbedder("some-model")
+
+
 def test_create_embedder_api_requires_key(monkeypatch):
     monkeypatch.delenv("KB_TEST_KEY", raising=False)
     with pytest.raises(EmbedderUnavailable):
