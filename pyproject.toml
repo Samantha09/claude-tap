@@ -38,7 +38,7 @@ requires = ["setuptools>=68.0", "setuptools-scm[toml]>=8.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["claude_tap", "claude_tap.viewer_assets"]
+packages = ["claude_tap", "claude_tap.viewer_assets", "claude_tap.prompt_kb"]
 
 [tool.setuptools_scm]
 version_scheme = "guess-next-dev"
@@ -57,6 +57,10 @@ dev = [
     "coverage>=7.6",
     "matplotlib==3.11.1",
     "ruff>=0.11",
+]
+rag = [
+    "sentence-transformers>=2.7",
+    "numpy>=1.26",
 ]
 
 [tool.ruff]

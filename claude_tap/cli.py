@@ -1082,6 +1082,11 @@ def main_entry() -> None:
 
         sys.exit(macos_bundle.main(sys.argv[2:]))
 
+    if len(sys.argv) > 1 and sys.argv[1] == "kb":
+        from claude_tap.prompt_kb.cli import kb_main
+
+        sys.exit(kb_main(sys.argv[2:]))
+
     if len(sys.argv) > 1 and sys.argv[1] == "dashboard":
         args = parse_dashboard_args(sys.argv[2:])
         try:

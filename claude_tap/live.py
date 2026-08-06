@@ -5,9 +5,11 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import json
+import logging
 import re
 import secrets
 import tempfile
+import threading
 from datetime import date, datetime
 from pathlib import Path
 from urllib.parse import quote, urlsplit
@@ -26,6 +28,10 @@ from claude_tap.dashboard import (
     redact_dashboard_summary,
 )
 from claude_tap.history import delete_trace_history, migrate_legacy_traces
+from claude_tap.prompt_kb.embed import EmbedderUnavailable, create_embedder, load_config
+from claude_tap.prompt_kb.index import ensure_embedder_meta, rebuild_index, run_index_loop
+from claude_tap.prompt_kb.search import ReindexRequired, search as kb_search
+from claude_tap.prompt_kb.store import KbStore
 from claude_tap.shared_dashboard import CLAUDE_TAP_VERSION, dashboard_url
 from claude_tap.trace_store import get_trace_store, resolve_db_path
 from claude_tap.viewer import (
@@ -52,6 +58,8 @@ def _is_valid_stats_date(value: str) -> bool:
 
 
 _DASHBOARD_QUIT_TOKEN_HEADER = "X-Claude-Tap-Dashboard-Token"
+
+logger = logging.getLogger(__name__)
 
 
 def _split_host_port(value: str) -> tuple[str, int | None]:
@@ -250,6 +258,10 @@ class LiveViewerServer:
         app.router.add_get("/api/sessions/{session_id}/export/log", self._handle_export_log)
         app.router.add_get("/api/sessions/{session_id}/export/html", self._handle_export_html)
         app.router.add_get("/api/stats", self._handle_stats)
+        app.router.add_get("/api/kb/search", self._handle_kb_search)
+        app.router.add_get("/api/kb/status", self._handle_kb_status)
+        app.router.add_post("/api/kb/reindex", self._handle_kb_reindex)
+        app.router.add_get("/api/kb/timeline", self._handle_kb_timeline)
 
         self._runner = web.AppRunner(app)
         await self._runner.setup()
@@ -264,11 +276,22 @@ class LiveViewerServer:
         if self.dashboard_mode:
             self._dashboard_snapshot = dashboard_trace_snapshot()
             self._dashboard_watch_task = asyncio.create_task(self._watch_dashboard_store())
+            self._kb_stop = threading.Event()
+            self._kb_thread = threading.Thread(
+                target=run_index_loop,
+                kwargs={"stop_event": self._kb_stop},
+                daemon=True,
+                name="prompt-kb-indexer",
+            )
+            self._kb_thread.start()
 
         return self._actual_port
 
     async def stop(self) -> None:
         """Stop the viewer server."""
+        kb_stop = getattr(self, "_kb_stop", None)
+        if kb_stop is not None:
+            kb_stop.set()
         async with self._stop_lock:
             if self._shutdown_event.is_set() and self._runner is None:
                 return
@@ -537,6 +560,102 @@ class LiveViewerServer:
                 dumps=lambda data: json.dumps(data, ensure_ascii=False),
             )
         return web.json_response(get_trace_store().get_stats(date_from=date_from, date_to=date_to))
+
+    def _kb_embedder(self):
+        """Process-wide lazy embedder shared by search and reindex."""
+        if getattr(self, "_kb_embedder_instance", None) is None:
+            embedder = create_embedder(load_config())
+            store = KbStore.default()
+            ensure_embedder_meta(store, embedder)
+            self._kb_embedder_instance = embedder
+        return self._kb_embedder_instance
+
+    @staticmethod
+    def _kb_unavailable_response(exc: Exception) -> web.Response:
+        return web.json_response(
+            {"error": "rag_extra_missing", "hint": str(exc)}, status=501,
+        )
+
+    async def _handle_kb_search(self, request: web.Request) -> web.Response:
+        query = request.query.get("q", "").strip()
+        if not query:
+            return web.json_response({"results": []})
+        try:
+            embedder = self._kb_embedder()
+        except EmbedderUnavailable as exc:
+            return self._kb_unavailable_response(exc)
+        try:
+            results = kb_search(
+                KbStore.default(), embedder, query,
+                client=request.query.get("client") or None,
+                kind=request.query.get("kind") or None,
+                limit=int(request.query.get("limit", "10")),
+            )
+        except EmbedderUnavailable as exc:
+            # search() may raise here too (api embedder without numpy).
+            return self._kb_unavailable_response(exc)
+        except ReindexRequired as exc:
+            return web.json_response(
+                {"error": "reindex_required", "hint": str(exc)}, status=409,
+            )
+        return web.json_response({"results": [
+            {
+                "snapshot_id": group.snapshot_id,
+                "client": group.client,
+                "model": group.model,
+                "first_seen": group.first_seen,
+                "last_seen": group.last_seen,
+                "session_count": group.session_count,
+                "hits": [
+                    {"kind": h.kind, "title": h.title, "text": h.text, "score": h.score}
+                    for h in group.hits
+                ],
+            }
+            for group in results
+        ]})
+
+    async def _handle_kb_status(self, request: web.Request) -> web.Response:
+        store = KbStore.default()
+        try:
+            embedder = self._kb_embedder()
+        except EmbedderUnavailable as exc:
+            return web.json_response({
+                "available": False, "stats": store.stats(),
+                "embedder": None, "hint": str(exc),
+            })
+        return web.json_response({
+            "available": True, "stats": store.stats(),
+            "embedder": embedder.name, "hint": None,
+        })
+
+    async def _handle_kb_reindex(self, request: web.Request) -> web.Response:
+        try:
+            embedder = self._kb_embedder()
+        except EmbedderUnavailable as exc:
+            return self._kb_unavailable_response(exc)
+
+        def _rebuild() -> None:
+            try:
+                rebuild_index(KbStore.default(), embedder)
+            except Exception:  # noqa: BLE001
+                logger.exception("kb reindex failed")
+
+        threading.Thread(target=_rebuild, daemon=True, name="prompt-kb-reindex").start()
+        return web.json_response({"started": True}, status=202)
+
+    async def _handle_kb_timeline(self, request: web.Request) -> web.Response:
+        store = KbStore.default()
+        versions = store.timeline(
+            request.query.get("client", ""), request.query.get("model", ""),
+        )
+        return web.json_response({"versions": [
+            {
+                "id": row["id"], "content_hash": row["content_hash"],
+                "first_seen": row["first_seen"], "last_seen": row["last_seen"],
+                "session_count": row["session_count"],
+            }
+            for row in versions
+        ]})
 
     async def _handle_sessions(self, request: web.Request) -> web.Response:
         """Return trace history sessions."""
