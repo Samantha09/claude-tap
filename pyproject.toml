@@ -58,6 +58,10 @@ dev = [
     "matplotlib==3.11.1",
     "ruff>=0.11",
 ]
+rag = [
+    "sentence-transformers>=2.7",
+    "numpy>=1.26",
+]
 
 [tool.ruff]
 target-version = "py311"

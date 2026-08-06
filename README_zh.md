@@ -622,6 +622,14 @@ macOS 上，`claude-tap build-macos-app` 会生成本地 `Claude Tap.app`。该 
 - **复制助手** — 一键复制请求 JSON 或 cURL 命令
 - **多语言** — English, 简体中文, 日本語, 한국어, Français, العربية, Deutsch, Русский
 
+## Prompt 知识库（可选）
+
+安装 `pip install 'claude-tap[rag]'` 后，dashboard 的「Prompt 知识库」页可对本地
+采集到的各家 CLI system prompt 与工具定义做语义搜索，并查看每个 client/model 的
+prompt 版本时间线。索引完全在本地完成（默认 `intfloat/multilingual-e5-small`，
+可用 `CLAUDE_TAP_KB_EMBEDDER=api` 等环境变量切换到 OpenAI 兼容 embedding API）。
+命令行等价物：`claude-tap kb search "..."` / `claude-tap kb reindex` / `claude-tap kb status`。
+
 ## 架构
 
 ![架构图](docs/architecture.png)

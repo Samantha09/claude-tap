@@ -631,6 +631,10 @@ The viewer is a single self-contained HTML file (zero external dependencies):
 - **Copy helpers** — one-click copy of request JSON or cURL command
 - **i18n** — English, 简体中文, 日本語, 한국어, Français, العربية, Deutsch, Русский
 
+## Prompt Knowledge Base (optional)
+
+After `pip install 'claude-tap[rag]'`, the dashboard's "Prompt Knowledge Base" page can semantically search the system prompts and tool definitions captured locally from each CLI, and show a prompt version timeline per client/model. Indexing runs entirely locally (default `intfloat/multilingual-e5-small`; set `CLAUDE_TAP_KB_EMBEDDER=api` and related environment variables to switch to an OpenAI-compatible embedding API). CLI equivalents: `claude-tap kb search "..."` / `claude-tap kb reindex` / `claude-tap kb status`.
+
 ## Architecture
 
 ![Architecture](docs/architecture.png)
