@@ -1668,6 +1668,8 @@ async def test_dashboard_session_route_serves_standalone_viewer(trace_db, tmp_pa
             browser = await pw.chromium.launch(headless=True)
             try:
                 page = await browser.new_page(accept_downloads=True)
+                # The app defaults to zh-CN; these assertions expect English UI strings.
+                await page.add_init_script("localStorage.setItem('claude-tap-lang', 'en')")
                 await page.goto(
                     f"http://127.0.0.1:{port}/dashboard/session/{session_id}",
                     wait_until="domcontentloaded",
@@ -1746,6 +1748,8 @@ async def test_dashboard_session_export_menu_is_not_clipped_on_mobile(trace_db, 
             browser = await pw.chromium.launch(headless=True)
             try:
                 page = await browser.new_page(viewport={"width": 390, "height": 900})
+                # The app defaults to zh-CN; these assertions expect English UI strings.
+                await page.add_init_script("localStorage.setItem('claude-tap-lang', 'en')")
                 await page.goto(
                     f"http://127.0.0.1:{port}/dashboard/session/{session_id}",
                     wait_until="domcontentloaded",
@@ -1803,6 +1807,8 @@ async def test_dashboard_bulk_delete_edit_mode_focuses_confirmation_dialog(trace
             browser = await pw.chromium.launch(headless=True)
             try:
                 page = await browser.new_page()
+                # The app defaults to zh-CN; these assertions expect English UI strings.
+                await page.add_init_script("localStorage.setItem('claude-tap-lang', 'en')")
                 await page.goto(f"http://127.0.0.1:{port}/dashboard", wait_until="domcontentloaded")
                 assert await page.locator("[data-delete-session]").count() == 0
 
@@ -1853,6 +1859,8 @@ async def test_dashboard_edit_mode_allows_selecting_stale_empty_sessions(trace_d
             browser = await pw.chromium.launch(headless=True)
             try:
                 page = await browser.new_page()
+                # The app defaults to zh-CN; these assertions expect English UI strings.
+                await page.add_init_script("localStorage.setItem('claude-tap-lang', 'en')")
                 await page.goto(f"http://127.0.0.1:{port}/dashboard", wait_until="domcontentloaded")
                 await page.locator("#edit-sessions").click()
 

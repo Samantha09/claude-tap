@@ -249,6 +249,8 @@ def test_viewer_renders_gemini_semantic_sections(gemini_html_file: Path) -> None
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=True)
         page = browser.new_page()
+        # The app defaults to zh-CN; this test asserts English UI strings.
+        page.add_init_script("localStorage.setItem('claude-tap-lang', 'en')")
         page.goto(f"file://{gemini_html_file}", timeout=10000)
         page.wait_for_selector(".sidebar-item", timeout=5000)
         page.locator(".sidebar-item").first.click()

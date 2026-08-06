@@ -35,6 +35,8 @@ def responses_page(responses_html_file: Path):
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=True)
         page = browser.new_page()
+        # The app defaults to zh-CN; these tests assert English UI strings.
+        page.add_init_script("localStorage.setItem('claude-tap-lang', 'en')")
         page.goto(f"file://{responses_html_file}", timeout=10000)
         page.wait_for_selector(".sidebar-item", timeout=5000)
         yield page
@@ -57,6 +59,8 @@ def codex_ws_multi_page(codex_ws_multi_html_file: Path):
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=True)
         page = browser.new_page()
+        # The app defaults to zh-CN; these tests assert English UI strings.
+        page.add_init_script("localStorage.setItem('claude-tap-lang', 'en')")
         page.goto(f"file://{codex_ws_multi_html_file}", timeout=10000)
         page.wait_for_selector(".sidebar-item", timeout=5000)
         yield page
@@ -120,6 +124,8 @@ def chat_completions_history_page(chat_completions_history_html_file: Path):
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=True)
         page = browser.new_page()
+        # The app defaults to zh-CN; these tests assert English UI strings.
+        page.add_init_script("localStorage.setItem('claude-tap-lang', 'en')")
         page.goto(f"file://{chat_completions_history_html_file}", timeout=10000)
         page.wait_for_selector(".sidebar-item", timeout=5000)
         yield page

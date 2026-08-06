@@ -1,15 +1,9 @@
 /* ─── i18n ─── */
 const I18N = typeof __CLAUDE_TAP_I18N__ !== 'undefined' ? __CLAUDE_TAP_I18N__ : { en: {} };
-function detectLang() {
-  const supported = ['en','zh-CN','ja','ko','fr','ar','de','ru'];
-  const nav = navigator.language || navigator.userLanguage || 'en';
-  if (supported.includes(nav)) return nav;
-  const prefix = nav.split('-')[0];
-  if (prefix === 'zh') return 'zh-CN';
-  const match = supported.find(s => s.startsWith(prefix));
-  return match || 'en';
-}
-let currentLang = safeLocalStorageGet('claude-tap-lang') || detectLang();
+// Default UI language when the user has not picked one; the language
+// selector still overrides via localStorage.
+const DEFAULT_LANG = 'zh-CN';
+let currentLang = safeLocalStorageGet('claude-tap-lang') || DEFAULT_LANG;
 function t(key) {
   const en = I18N.en || {};
   return (I18N[currentLang] || en)[key] || en[key] || key;

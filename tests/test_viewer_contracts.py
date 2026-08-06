@@ -1816,6 +1816,8 @@ def _open_viewer_with_error_capture(page: Page, html_path: Path) -> list[str]:
     errors: list[str] = []
     page.on("pageerror", lambda exc: errors.append(f"pageerror: {exc}"))
     page.on("console", lambda msg: errors.append(f"console.error: {msg.text}") if msg.type == "error" else None)
+    # The app defaults to zh-CN; these contracts assert English UI strings.
+    page.add_init_script("localStorage.setItem('claude-tap-lang', 'en')")
     page.goto(html_path.resolve().as_uri(), timeout=10000)
     page.wait_for_selector(".sidebar-item", timeout=5000)
     return errors
@@ -2788,6 +2790,8 @@ def test_viewer_empty_embedded_trace_renders_explicit_no_api_calls_state(tmp_pat
     page.on("pageerror", lambda exc: errors.append(f"pageerror: {exc}"))
     page.on("console", lambda msg: errors.append(f"console.error: {msg.text}") if msg.type == "error" else None)
     try:
+        # The app defaults to zh-CN; these assertions expect English UI strings.
+        page.add_init_script("localStorage.setItem('claude-tap-lang', 'en')")
         page.goto(html_path.resolve().as_uri(), timeout=10000)
         page.wait_for_selector(".empty-trace-state", timeout=5000)
         state = page.evaluate(

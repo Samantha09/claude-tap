@@ -27,6 +27,8 @@ def verify_viewer_html(html_path: str) -> list[str]:
         page = browser.new_page(viewport={"width": 1400, "height": 900})
         errors: list[str] = []
         page.on("pageerror", lambda e: errors.append(str(e)))
+        # The app defaults to zh-CN; the text checks below expect English UI strings.
+        page.add_init_script("localStorage.setItem('claude-tap-lang', 'en')")
         page.goto(Path(html_path).absolute().as_uri(), wait_until="domcontentloaded", timeout=15000)
         page.wait_for_timeout(2000)
         if errors:

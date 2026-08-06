@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -1399,12 +1399,10 @@ const DASHBOARD_I18N = {
   }
 };
 
-let currentLang = localStorage.getItem("claude-tap-lang") || detectLang();
-
-function detectLang() {
-  const nav = navigator.language || navigator.userLanguage || "en";
-  return nav.toLowerCase().startsWith("zh") ? "zh-CN" : "en";
-}
+// Default UI language when the user has not picked one; the language
+// selector still overrides via localStorage.
+const DEFAULT_LANG = "zh-CN";
+let currentLang = localStorage.getItem("claude-tap-lang") || DEFAULT_LANG;
 
 function t(key, params = {}) {
   const template = (DASHBOARD_I18N[currentLang] || DASHBOARD_I18N.en)[key] || DASHBOARD_I18N.en[key] || key;
