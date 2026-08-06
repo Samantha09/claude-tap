@@ -85,7 +85,8 @@ claude_tap/prompt_kb/
 
 - `dashboard.py`：新增 `/api/kb/search`、`/api/kb/status`、`/api/kb/reindex` 路由；
   启动时 spawn 懒索引后台线程
-- `dashboard.html`：新增"Prompt 知识库"标签页（搜索框 + 过滤器 + 结果列表 + 版本时间线视图）
+- `dashboard.html`：新增"Prompt 知识库"标签页（搜索框 + 过滤器 + 结果列表 + 版本时间线视图）。
+  项目界面默认语言已为简体中文（2026-08-06 起），本页面 i18n 条目以中文为源语言编写
 - `cli.py`：新增 `claude-tap kb search` / `claude-tap kb reindex` 子命令
 - `pyproject.toml`：新增可选依赖组 `rag = ["sentence-transformers", "numpy"]`
 
