@@ -135,3 +135,4 @@ def test_notes_era_v6_database_is_accepted(tmp_path):
     rows = reopened.list_session_rows()
     assert [row["id"] for row in rows] == [session_id]
     assert rows[0]["cwd"] == "/proj/demo"
+    assert reopened.get_stats()["totals"]["sessions"] == 1

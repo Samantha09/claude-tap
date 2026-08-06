@@ -8,7 +8,7 @@ import json
 import re
 import secrets
 import tempfile
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from urllib.parse import quote, urlsplit
 
@@ -41,6 +41,15 @@ from claude_tap.viewer import (
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 DEFAULT_SESSION_PAGE_LIMIT = 100
 MAX_SESSION_PAGE_LIMIT = 500
+
+
+def _is_valid_stats_date(value: str) -> bool:
+    try:
+        datetime.strptime(value, "%Y-%m-%d")
+    except ValueError:
+        return False
+    return True
+
 
 _DASHBOARD_QUIT_TOKEN_HEADER = "X-Claude-Tap-Dashboard-Token"
 
@@ -240,6 +249,7 @@ class LiveViewerServer:
         app.router.add_get("/api/sessions/{session_id}/export/compact", self._handle_export_compact)
         app.router.add_get("/api/sessions/{session_id}/export/log", self._handle_export_log)
         app.router.add_get("/api/sessions/{session_id}/export/html", self._handle_export_html)
+        app.router.add_get("/api/stats", self._handle_stats)
 
         self._runner = web.AppRunner(app)
         await self._runner.setup()
@@ -508,6 +518,25 @@ class LiveViewerServer:
         self._finalize_stale_active_sessions()
         live_count = await self._current_live_record_count()
         return web.json_response({"agents": list_trace_agents(self.session_id, live_record_count=live_count)})
+
+    async def _handle_stats(self, request: web.Request) -> web.Response:
+        """Return aggregated statistics for the dashboard stats view."""
+        date_from = request.query.get("from", "").strip()
+        date_to = request.query.get("to", "").strip()
+        for name, value in (("from", date_from), ("to", date_to)):
+            if value and not _is_valid_stats_date(value):
+                return web.json_response(
+                    {"error": f"日期格式无效：{name}={value}，应为 YYYY-MM-DD"},
+                    status=400,
+                    dumps=lambda data: json.dumps(data, ensure_ascii=False),
+                )
+        if date_from and date_to and date_from > date_to:
+            return web.json_response(
+                {"error": f"日期范围起止颠倒：from={date_from} 晚于 to={date_to}"},
+                status=400,
+                dumps=lambda data: json.dumps(data, ensure_ascii=False),
+            )
+        return web.json_response(get_trace_store().get_stats(date_from=date_from, date_to=date_to))
 
     async def _handle_sessions(self, request: web.Request) -> web.Response:
         """Return trace history sessions."""

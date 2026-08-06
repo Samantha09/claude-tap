@@ -358,6 +358,106 @@ class TraceStore:
             "total_errors": int(row["total_errors"] or 0) if row else 0,
         }
 
+    def get_stats(self, *, date_from: str = "", date_to: str = "") -> dict[str, Any]:
+        """Aggregate all sessions for the dashboard stats view.
+
+        Dates filter on ``date_key`` (local session date), inclusive on both
+        sides. Token totals come from ``summary_json``; per-model counts come
+        from the ``models_used`` map (model -> API call count).
+        """
+        where_sql = ""
+        params: list[str] = []
+        if date_from and date_to:
+            where_sql = "WHERE date_key BETWEEN ? AND ?"
+            params = [date_from, date_to]
+        elif date_from:
+            where_sql = "WHERE date_key >= ?"
+            params = [date_from]
+        elif date_to:
+            where_sql = "WHERE date_key <= ?"
+            params = [date_to]
+
+        with self._read_connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT date_key, client, cwd, record_count, status, summary_json
+                FROM sessions
+                {where_sql}
+                """,
+                params,
+            ).fetchall()
+
+        totals = {
+            "sessions": 0,
+            "records": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_read_tokens": 0,
+            "cache_create_tokens": 0,
+            "errors": 0,
+        }
+        daily: dict[str, dict[str, Any]] = {}
+        by_client: dict[str, dict[str, Any]] = {}
+        by_project: dict[str, dict[str, Any]] = {}
+        by_model: dict[str, dict[str, Any]] = {}
+
+        for row in rows:
+            summary: dict[str, Any] = {}
+            if row["summary_json"]:
+                try:
+                    summary = json.loads(row["summary_json"])
+                except (TypeError, ValueError):
+                    summary = {}
+            tokens = (
+                int(summary.get("input_tokens") or 0)
+                + int(summary.get("output_tokens") or 0)
+                + int(summary.get("cache_read_tokens") or 0)
+                + int(summary.get("cache_create_tokens") or 0)
+            )
+
+            totals["sessions"] += 1
+            totals["records"] += int(row["record_count"] or 0)
+            totals["input_tokens"] += int(summary.get("input_tokens") or 0)
+            totals["output_tokens"] += int(summary.get("output_tokens") or 0)
+            totals["cache_read_tokens"] += int(summary.get("cache_read_tokens") or 0)
+            totals["cache_create_tokens"] += int(summary.get("cache_create_tokens") or 0)
+            # Stored summaries come in two shapes: the live writer emits
+            # ``has_error``/``models_used``; the dashboard refresh emits
+            # ``status``/``model``. Accept both.
+            if row["status"] == "error" or summary.get("has_error") or summary.get("status") == "error":
+                totals["errors"] += 1
+
+            day = daily.setdefault(row["date_key"], {"date": row["date_key"], "sessions": 0, "tokens": 0})
+            day["sessions"] += 1
+            day["tokens"] += tokens
+
+            client = by_client.setdefault(
+                row["client"] or "", {"client": row["client"] or "", "sessions": 0, "tokens": 0}
+            )
+            client["sessions"] += 1
+            client["tokens"] += tokens
+
+            project = by_project.setdefault(row["cwd"] or "", {"cwd": row["cwd"] or "", "sessions": 0, "tokens": 0})
+            project["sessions"] += 1
+            project["tokens"] += tokens
+
+            model = summary.get("model") or ""
+            if not model:
+                models_used = summary.get("models_used") or {}
+                model = max(models_used, key=lambda key: models_used[key], default="")
+            if model and model != "unknown":
+                bucket = by_model.setdefault(model, {"model": model, "sessions": 0, "tokens": 0})
+                bucket["sessions"] += 1
+                bucket["tokens"] += tokens
+
+        return {
+            "totals": totals,
+            "daily": [daily[key] for key in sorted(daily)],
+            "by_client": sorted(by_client.values(), key=lambda item: item["tokens"], reverse=True),
+            "by_model": sorted(by_model.values(), key=lambda item: item["tokens"], reverse=True),
+            "by_project": sorted(by_project.values(), key=lambda item: item["tokens"], reverse=True),
+        }
+
     def list_agent_buckets(self) -> list[sqlite3.Row]:
         """Return session counts grouped by stored agent signal without loading records."""
         agent_expr = self._agent_label_expr()
