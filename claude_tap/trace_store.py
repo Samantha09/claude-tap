@@ -29,7 +29,7 @@ from claude_tap.compact_trace import (
 )
 
 DB_FILENAME = "traces.sqlite3"
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 6
 SQLITE_BUSY_TIMEOUT_MS = 1000
 WRITE_LOCK_TIMEOUT_SECONDS = 1.0
 WRITE_LOCK_RETRY_SECONDS = 0.01
@@ -106,6 +106,7 @@ class TraceStore:
         client: str = "",
         proxy_mode: str = "",
         started_at: datetime | None = None,
+        cwd: str = "",
     ) -> str:
         """Create a new active trace session and return its id."""
         session_id = str(uuid.uuid4())
@@ -116,11 +117,11 @@ class TraceStore:
             conn.execute(
                 """
                 INSERT INTO sessions (
-                    id, started_at, updated_at, date_key, client, proxy_mode, status, record_count
+                    id, started_at, updated_at, date_key, client, proxy_mode, status, record_count, cwd
                 )
-                VALUES (?, ?, ?, ?, ?, ?, 'active', 0)
+                VALUES (?, ?, ?, ?, ?, ?, 'active', 0, ?)
                 """,
-                (session_id, started_at_iso, started_at_iso, date_key, client, proxy_mode),
+                (session_id, started_at_iso, started_at_iso, date_key, client, proxy_mode, cwd),
             )
             conn.commit()
         return session_id
@@ -1070,6 +1071,12 @@ class TraceStore:
             current = 3
         if current == 3:
             self._migrate_v3_to_v4(conn)
+            current = 4
+        if current == 4:
+            self._migrate_v4_to_v5(conn)
+            current = 5
+        if current == 5:
+            self._migrate_v5_to_v6(conn)
             return
         if current != SCHEMA_VERSION:
             raise RuntimeError(f"Unsupported trace database schema version {current}; expected {SCHEMA_VERSION}.")
@@ -1138,6 +1145,21 @@ class TraceStore:
 
     def _migrate_v3_to_v4(self, conn: sqlite3.Connection) -> None:
         self._create_v4_tables(conn)
+        conn.execute("PRAGMA user_version = 4")
+        conn.commit()
+
+    def _migrate_v4_to_v5(self, conn: sqlite3.Connection) -> None:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(sessions)")}
+        if "cwd" not in columns:
+            conn.execute("ALTER TABLE sessions ADD COLUMN cwd TEXT NOT NULL DEFAULT ''")
+        conn.execute("PRAGMA user_version = 5")
+        conn.commit()
+
+    def _migrate_v5_to_v6(self, conn: sqlite3.Connection) -> None:
+        # v6 matches the notes-era stamp: that schema added cwd (now v5 here)
+        # plus personal tables (tags, notes, summaries, FTS). Those tables are
+        # no longer managed but are left in place; v6 only re-stamps so both
+        # notes-era and fresh databases converge on one accepted version.
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         conn.commit()
 
@@ -1155,7 +1177,8 @@ class TraceStore:
                 record_count INTEGER NOT NULL DEFAULT 0,
                 summary_json TEXT,
                 legacy_source_key TEXT NOT NULL DEFAULT '',
-                legacy_rel_path TEXT
+                legacy_rel_path TEXT,
+                cwd TEXT NOT NULL DEFAULT ''
             )
             """
         )

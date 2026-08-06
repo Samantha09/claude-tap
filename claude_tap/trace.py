@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 import sqlite3
 import sys
@@ -151,10 +152,13 @@ def create_trace_writer(
     proxy_mode: str,
     metadata: dict[str, str],
     started_at: datetime | None = None,
+    cwd: str | None = None,
 ) -> TraceWriter:
     """Create a writer without letting unavailable trace storage block the client."""
+    if cwd is None:
+        cwd = os.getcwd()
     try:
-        session_id = store.create_session(client=client, proxy_mode=proxy_mode, started_at=started_at)
+        session_id = store.create_session(client=client, proxy_mode=proxy_mode, started_at=started_at, cwd=cwd)
     except sqlite3.Error as exc:
         writer = TraceWriter(str(uuid.uuid4()), live_server=None, metadata=metadata, store=store)
         writer.record_startup_storage_error(exc)
