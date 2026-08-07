@@ -72,3 +72,14 @@ def test_search_detects_embedder_mismatch(trace_db):
 
     with pytest.raises(ReindexRequired):
         search(store, OtherEmbedder(), "shell")
+
+
+def test_search_respects_min_score(trace_db):
+    store = _indexed_store()
+    all_hits = search(store, FakeEmbedder(), "shell sandbox", min_score=0.0)
+    total = sum(len(g.hits) for g in all_hits)
+    filtered = search(store, FakeEmbedder(), "shell sandbox", min_score=0.999)
+    kept = sum(len(g.hits) for g in filtered)
+    assert total > 0
+    assert kept < total
+    assert all(h.score >= 0.999 for g in filtered for h in g.hits)

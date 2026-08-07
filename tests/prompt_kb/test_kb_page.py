@@ -24,3 +24,16 @@ def test_refresh_sessions_preserves_kb_view():
     assert 'state.view !== "detail" && state.view !== "kb" && state.view !== "stats"' in html
     assert 'state.view !== "kb" && state.view !== "stats" && (!preserveSelection || !stillVisible)' in html
     assert '} else if (state.view !== "kb" && state.view !== "stats") {' in html
+
+
+def test_kb_timeline_toggles_instead_of_stacking():
+    html = read_dashboard_template()
+    assert 'card.querySelector("ul.kb-timeline")' in html
+    assert 'list.className = "kb-timeline"' in html
+    assert "fmtTime(v.first_seen)" in html
+
+
+def test_kb_status_uses_short_embedder_label():
+    html = read_dashboard_template()
+    assert "kbEmbedderLabel(data.embedder)" in html
+    assert "fmtTime(group.first_seen)" in html

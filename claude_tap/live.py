@@ -587,6 +587,10 @@ class LiveViewerServer:
         except EmbedderUnavailable as exc:
             return self._kb_unavailable_response(exc)
         try:
+            min_score = float(request.query.get("min_score", "") or 0.0)
+        except ValueError:
+            min_score = 0.0
+        try:
             results = kb_search(
                 KbStore.default(),
                 embedder,
@@ -594,6 +598,7 @@ class LiveViewerServer:
                 client=request.query.get("client") or None,
                 kind=request.query.get("kind") or None,
                 limit=int(request.query.get("limit", "10")),
+                min_score=min_score,
             )
         except EmbedderUnavailable as exc:
             # search() may raise here too (api embedder without numpy).

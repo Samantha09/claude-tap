@@ -87,3 +87,64 @@ def test_fake_embedder_semantic():
 
     assert cos(a, b) > cos(a, c)
     assert len(a) == 16
+
+
+def _fake_st_module(recorder: list) -> "object":
+    import sys
+    import types
+
+    fake = types.ModuleType("sentence_transformers")
+
+    class _FakeST:
+        def __init__(self, model_name):
+            self.model_name = model_name
+
+        def get_embedding_dimension(self):
+            return 4
+
+        def encode(self, texts, normalize_embeddings=True):
+            recorder.extend(texts)
+            return [[1.0, 0.0, 0.0, 0.0] for _ in texts]
+
+    fake.SentenceTransformer = _FakeST
+    return fake
+
+
+def test_local_embedder_applies_e5_prefixes(monkeypatch):
+    """E5-family models require 'query: '/'passage: ' prefixes; without them
+    similarity scores compress into a narrow band and junk scores high."""
+    import sys
+
+    recorder: list = []
+    monkeypatch.setitem(sys.modules, "sentence_transformers", _fake_st_module(recorder))
+    emb = embed_mod.LocalEmbedder("some-model")
+    emb.embed(["doc text"])
+    emb.embed_query(["user query"])
+    assert recorder == ["passage: doc text", "query: user query"]
+
+
+def test_local_embedder_name_marks_prefix_space(monkeypatch):
+    """Prefixing changes the vector space; the embedder name must differ from
+    pre-prefix indexes so kb_meta triggers ReindexRequired instead of mixing."""
+    import sys
+
+    monkeypatch.setitem(sys.modules, "sentence_transformers", _fake_st_module([]))
+    emb = embed_mod.LocalEmbedder("some-model")
+    assert emb.name != f"local:some-model"
+    assert emb.name.startswith("local:some-model")
+
+
+def test_api_embedder_embed_query_has_no_prefix(monkeypatch):
+    """API embedders have no prefix convention: embed_query delegates to embed."""
+    emb = embed_mod.ApiEmbedder(api_base="https://x.example", api_model="m", api_key="k")
+    calls = []
+    monkeypatch.setattr(emb, "embed", lambda texts: calls.append(texts) or [[0.1]])
+    assert emb.embed_query(["a"]) == [[0.1]]
+    assert calls == [["a"]]
+
+
+def test_load_config_prefix_env_override(tmp_path, monkeypatch):
+    monkeypatch.setenv("CLAUDE_TAP_KB_QUERY_PREFIX", "q:")
+    config = load_config(tmp_path / "missing.toml")
+    assert config.query_prefix == "q:"
+    assert config.passage_prefix == "passage: "

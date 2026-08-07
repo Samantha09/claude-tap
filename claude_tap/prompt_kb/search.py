@@ -51,6 +51,7 @@ def search(
     client: str | None = None,
     kind: str | None = None,
     limit: int = 10,
+    min_score: float = 0.0,
 ) -> list[SnapshotResult]:
     _check_embedder_meta(store, embedder)
     rows = store.indexed_chunks()
@@ -67,7 +68,8 @@ def search(
             "numpy is not installed; install the optional dependency: pip install 'claude-tap[rag]'"
         ) from exc
     matrix = np.array([np.frombuffer(row["embedding"], dtype=np.float32) for row in rows])
-    query_vec = np.array(embedder.embed([query])[0], dtype=np.float32)
+    embed_query = getattr(embedder, "embed_query", None) or embedder.embed
+    query_vec = np.array(embed_query([query])[0], dtype=np.float32)
     q_norm = np.linalg.norm(query_vec) or 1.0
     m_norms = np.linalg.norm(matrix, axis=1)
     m_norms[m_norms == 0] = 1.0
@@ -75,8 +77,8 @@ def search(
 
     groups: dict[int, SnapshotResult] = {}
     for row, score in zip(rows, scores):
-        if score <= 0:
-            continue  # no token/vector overlap with the query
+        if score <= min_score:
+            continue  # no relevance to the query (min_score=0 keeps only vector overlap)
         group = groups.setdefault(
             row["snapshot_id"],
             SnapshotResult(

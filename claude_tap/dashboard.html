@@ -2366,7 +2366,19 @@ async function kbLoadStatus() {
     return;
   }
   const s = data.stats;
-  el.textContent = `${data.embedder} · indexed=${s.indexed} pending=${s.pending} failed=${s.failed} · snapshots=${s.snapshots}`;
+  el.textContent = `${kbEmbedderLabel(data.embedder)} · indexed=${s.indexed} pending=${s.pending} failed=${s.failed} · snapshots=${s.snapshots}`;
+}
+
+function kbEmbedderLabel(embedder) {
+  // "local:/long/cache/path/models--org--name/snapshots/master+e5p" → "local:org/name"
+  if (!embedder) return "";
+  const [kind, ...rest] = embedder.split(":");
+  let id = rest.join(":").replace(/\+e5p$/, "");
+  if (id.includes("/")) {
+    const parts = id.split("/").filter(part => part && part !== "snapshots" && part !== "master" && part !== "models");
+    id = parts.length ? parts[parts.length - 1].replace(/--/g, "/") : id;
+  }
+  return `${kind}:${id}`;
 }
 
 async function kbSearch() {
@@ -2394,7 +2406,7 @@ function renderKbResults(results) {
     const card = document.createElement("div");
     card.className = "kb-group";
     const header = document.createElement("div");
-    header.textContent = `${group.client} / ${group.model} · ${t("kb_first_seen")} ${group.first_seen} · sessions ${group.session_count}`;
+    header.textContent = `${group.client} / ${group.model} · ${t("kb_first_seen")} ${fmtTime(group.first_seen)} · sessions ${group.session_count}`;
     card.appendChild(header);
     for (const hit of group.hits) {
       const hitEl = document.createElement("div");
@@ -2416,13 +2428,19 @@ function renderKbResults(results) {
 }
 
 async function kbLoadTimeline(group, card) {
+  const existing = card.querySelector("ul.kb-timeline");
+  if (existing) {
+    existing.remove();  // toggle off instead of stacking duplicate lists
+    return;
+  }
   const params = new URLSearchParams({ client: group.client, model: group.model });
   const resp = await fetch(`/api/kb/timeline?${params}`);
   const data = await resp.json();
   const list = document.createElement("ul");
+  list.className = "kb-timeline";
   for (const v of data.versions || []) {
     const item = document.createElement("li");
-    item.textContent = `${v.first_seen} · sessions ${v.session_count} · ${v.content_hash.slice(0, 8)}`;
+    item.textContent = `${fmtTime(v.first_seen)} · sessions ${v.session_count} · ${v.content_hash.slice(0, 8)}`;
     if (v.id === group.snapshot_id) item.style.fontWeight = "bold";
     list.appendChild(item);
   }
