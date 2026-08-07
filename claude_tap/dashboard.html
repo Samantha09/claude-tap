@@ -2494,6 +2494,39 @@ async function kbSearch() {
   renderKbResults(data.results || []);
 }
 
+function kbBestScore(group) {
+  return Math.max(0, ...(group.hits || []).map(h => h.score));
+}
+
+function kbFilterHits(group, minScore) {
+  return { ...group, hits: (group.hits || []).filter(h => h.score >= minScore) };
+}
+
+function kbFoldGroups(groups) {
+  const byKey = new Map();
+  for (const g of groups) {
+    const key = `${g.client}\n${g.model}`;
+    const list = byKey.get(key) || [];
+    list.push(g);
+    byKey.set(key, list);
+  }
+  const folded = [];
+  for (const list of byKey.values()) {
+    const sorted = [...list].sort(
+      (a, b) => new Date(b.first_seen).getTime() - new Date(a.first_seen).getTime()
+    );
+    folded.push({ main: sorted[0], history: sorted.slice(1) });
+  }
+  folded.sort((a, b) => kbBestScore(b.main) - kbBestScore(a.main));
+  return folded;
+}
+
+function kbScoreClass(score) {
+  if (score >= 0.9) return "score-high";
+  if (score >= 0.7) return "score-mid";
+  return "score-low";
+}
+
 function renderKbResults(results) {
   const container = $("#kb-results");
   container.innerHTML = "";
