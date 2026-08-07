@@ -55,3 +55,23 @@ def test_kb_new_i18n_entries_bilingual():
     for text in ("Min score", "Show full text", "Collapse", "Latest",
                  "history snapshot", "result group"):
         assert text in html, text
+
+
+def test_kb_controls_have_min_score_slider():
+    html = read_dashboard_template()
+    assert 'id="kb-min-score"' in html
+    assert 'type="range"' in html
+    assert 'id="kb-min-score-val"' in html
+
+
+def test_kb_new_css_classes_present():
+    html = read_dashboard_template()
+    for cls in (
+        ".kb-status-chips", ".kb-chip", ".kb-summary", ".kb-empty",
+        ".kb-group-header", ".kb-latest-badge", ".kb-group-meta",
+        ".kb-hit-head", ".kb-hit-kind.tool", ".kb-hit-kind.prompt",
+        ".kb-score-bar", ".kb-score-fill", ".score-high", ".score-mid",
+        ".score-low", ".kb-hit-text", ".kb-expand-btn", ".kb-history-fold",
+        ".kb-timeline-current", ".kb-btn-primary", ".kb-btn-secondary",
+    ):
+        assert cls in html, cls

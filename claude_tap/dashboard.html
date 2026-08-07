@@ -996,11 +996,85 @@ pre {
 .view-toggle-btn.active { color: var(--text); border-color: var(--accent, var(--border)); font-weight: 600; }
 
 .kb-view { display: flex; flex-direction: column; gap: 12px; }
-.kb-controls { display: flex; gap: 8px; }
-.kb-status { font-size: 12px; color: var(--text-secondary); }
-.kb-group { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px; background: var(--bg-card); }
-.kb-hit { margin-top: 8px; font-size: 13px; }
-.kb-hit-kind { font-size: 11px; border: 1px solid var(--border); border-radius: 8px; padding: 0 6px; margin-right: 6px; }
+.kb-controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.kb-controls input[type="search"] {
+  flex: 1 1 240px; min-width: 180px; padding: 6px 10px; font-size: 13px;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--bg-card); color: var(--text);
+}
+.kb-controls select {
+  padding: 6px 8px; font-size: 13px; border: 1px solid var(--border);
+  border-radius: var(--radius-sm); background: var(--bg-card); color: var(--text);
+}
+.kb-min-score-label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); }
+.kb-min-score-val { font-family: var(--mono); font-size: 12px; min-width: 34px; color: var(--text); }
+.kb-btn-primary {
+  padding: 6px 14px; font-size: 13px; border-radius: var(--radius-sm);
+  border: 1px solid var(--blue); background: var(--blue); color: #fff;
+}
+.kb-btn-primary:hover { filter: brightness(1.1); }
+.kb-btn-secondary {
+  padding: 6px 12px; font-size: 13px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--bg-card); color: var(--text-secondary);
+}
+.kb-btn-secondary:hover { border-color: var(--blue); color: var(--blue); }
+.kb-timeline-btn { align-self: flex-start; }
+.kb-status-chips { display: flex; gap: 8px; flex-wrap: wrap; }
+.kb-chip {
+  font-size: 11px; font-family: var(--mono); padding: 2px 8px; border-radius: 10px;
+  border: 1px solid var(--border); background: var(--bg-card); color: var(--text-secondary);
+}
+.kb-results { display: flex; flex-direction: column; gap: 12px; }
+.kb-summary { font-size: 13px; color: var(--text-secondary); }
+.kb-empty {
+  padding: 32px 16px; text-align: center; color: var(--text-secondary);
+  border: 1px dashed var(--border); border-radius: var(--radius-sm); font-size: 13px;
+}
+.kb-empty .kb-empty-title { font-size: 15px; margin-bottom: 6px; color: var(--text); }
+.kb-group {
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 12px 14px; background: var(--bg-card);
+  display: flex; flex-direction: column; gap: 10px;
+}
+.kb-group-header { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.kb-group-title { font-weight: 600; font-size: 14px; }
+.kb-latest-badge {
+  font-size: 10px; padding: 1px 6px; border-radius: 8px;
+  background: var(--green-bg); color: var(--green); font-weight: 600;
+}
+.kb-group-meta { font-size: 12px; color: var(--text-tertiary); }
+.kb-hit { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-radius: var(--radius-sm); background: var(--bg); }
+.kb-hit-head { display: flex; align-items: center; gap: 8px; }
+.kb-hit-kind { font-size: 11px; border-radius: 8px; padding: 0 6px; font-weight: 600; }
+.kb-hit-kind.tool { background: var(--blue-bg); color: var(--blue); }
+.kb-hit-kind.prompt { background: var(--purple-bg); color: var(--purple); }
+.kb-hit-title { font-size: 13px; font-weight: 600; font-family: var(--mono); }
+.kb-score { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+.kb-score-bar { width: 80px; height: 6px; border-radius: 3px; background: var(--bg-hover); overflow: hidden; }
+.kb-score-fill { display: block; height: 100%; border-radius: 3px; }
+.score-high .kb-score-fill { background: var(--green); }
+.score-high .kb-score-num { color: var(--green); }
+.score-mid .kb-score-fill { background: var(--blue); }
+.score-mid .kb-score-num { color: var(--blue); }
+.score-low .kb-score-fill { background: var(--text-tertiary); }
+.score-low .kb-score-num { color: var(--text-tertiary); }
+.kb-score-num { font-family: var(--mono); font-size: 12px; }
+.kb-hit-text { font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
+.kb-hit-text.full { font-family: var(--mono); white-space: pre-wrap; }
+.kb-expand-btn {
+  align-self: flex-start; border: none; background: none; padding: 0;
+  font-size: 12px; color: var(--blue); cursor: pointer;
+}
+.kb-history-fold > summary { cursor: pointer; font-size: 12px; color: var(--text-secondary); }
+.kb-history-fold .kb-group { margin-top: 8px; }
+.kb-timeline { list-style: none; margin: 4px 0 0; padding: 0 0 0 12px; border-left: 2px solid var(--border); }
+.kb-timeline li { position: relative; padding: 3px 0 3px 10px; font-size: 12px; color: var(--text-secondary); }
+.kb-timeline li::before {
+  content: ""; position: absolute; left: -17px; top: 9px;
+  width: 8px; height: 8px; border-radius: 50%; background: var(--border);
+}
+.kb-timeline li.kb-timeline-current { color: var(--text); font-weight: 600; }
+.kb-timeline li.kb-timeline-current::before { background: var(--green); }
 
 @media (max-width: 900px) {
   body { overflow: auto; height: auto; min-height: 100vh; }
@@ -1190,8 +1264,13 @@ pre {
         <option value="tool" data-i18n="kb_kind_tool">工具</option>
         <option value="prompt_section" data-i18n="kb_kind_prompt">Prompt 段落</option>
       </select>
-      <button id="kb-search-btn" data-i18n="kb_search_btn">搜索</button>
-      <button id="kb-reindex-btn" data-i18n="kb_reindex_btn">重建索引</button>
+      <label class="kb-min-score-label">
+        <span data-i18n="kb_min_score">最低分数</span>
+        <input id="kb-min-score" type="range" min="0" max="1" step="0.05" value="0">
+        <span id="kb-min-score-val" class="kb-min-score-val">0.00</span>
+      </label>
+      <button id="kb-search-btn" class="kb-btn-primary" data-i18n="kb_search_btn">搜索</button>
+      <button id="kb-reindex-btn" class="kb-btn-secondary" data-i18n="kb_reindex_btn">重建索引</button>
     </div>
     <div id="kb-status" class="kb-status"></div>
     <div id="kb-results" class="kb-results"></div>
