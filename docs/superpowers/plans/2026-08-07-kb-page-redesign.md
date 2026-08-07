@@ -58,7 +58,7 @@ def test_kb_new_i18n_entries_bilingual():
 
 - [ ] **Step 2: 跑测试确认失败**
 
-Run: `uv run pytest tests/prompt_kb/test_kb_page.py::test_kb_new_i18n_entries_bilingual -v`
+Run: `.venv/bin/pytest tests/prompt_kb/test_kb_page.py::test_kb_new_i18n_entries_bilingual -v`
 Expected: FAIL（`kb_min_score:` not in html）
 
 - [ ] **Step 3: 加 i18n 词条**
@@ -99,7 +99,7 @@ zh-CN 字典（1549 行 `kb_unavailable: "知识库不可用："` 同样处理�
 
 - [ ] **Step 4: 跑测试确认通过**
 
-Run: `uv run pytest tests/prompt_kb/test_kb_page.py -v`
+Run: `.venv/bin/pytest tests/prompt_kb/test_kb_page.py -v`
 Expected: 全部 PASS（含既有锚点测试）
 
 - [ ] **Step 5: Commit**
@@ -147,7 +147,7 @@ def test_kb_new_css_classes_present():
 
 - [ ] **Step 2: 跑测试确认失败**
 
-Run: `uv run pytest tests/prompt_kb/test_kb_page.py::test_kb_controls_have_min_score_slider tests/prompt_kb/test_kb_page.py::test_kb_new_css_classes_present -v`
+Run: `.venv/bin/pytest tests/prompt_kb/test_kb_page.py::test_kb_controls_have_min_score_slider tests/prompt_kb/test_kb_page.py::test_kb_new_css_classes_present -v`
 Expected: FAIL
 
 - [ ] **Step 3a: 替换 CSS（998-1003 行的 4 条 `.kb-*` 规则整体替换为）**
@@ -257,7 +257,7 @@ Expected: FAIL
 
 - [ ] **Step 4: 跑测试确认通过**
 
-Run: `uv run pytest tests/prompt_kb/test_kb_page.py -v`
+Run: `.venv/bin/pytest tests/prompt_kb/test_kb_page.py -v`
 Expected: 全部 PASS
 
 - [ ] **Step 5: Commit**
@@ -378,7 +378,7 @@ def test_score_class_thresholds():
 
 - [ ] **Step 2: 跑测试确认失败**
 
-Run: `uv run pytest tests/prompt_kb/test_kb_render_logic.py -v`
+Run: `.venv/bin/pytest tests/prompt_kb/test_kb_render_logic.py -v`
 Expected: `test_js_functions_exist_in_template` FAIL，其余 PASS（纯 Python 复制逻辑）
 
 - [ ] **Step 3: 实现 JS 函数**
@@ -422,7 +422,7 @@ function kbScoreClass(score) {
 
 - [ ] **Step 4: 跑测试确认通过**
 
-Run: `uv run pytest tests/prompt_kb/test_kb_render_logic.py -v`
+Run: `.venv/bin/pytest tests/prompt_kb/test_kb_render_logic.py -v`
 Expected: 全部 PASS
 
 - [ ] **Step 5: Commit**
@@ -469,7 +469,7 @@ def test_kb_timeline_current_uses_class():
 
 - [ ] **Step 2: 跑测试确认失败**
 
-Run: `uv run pytest tests/prompt_kb/test_kb_page.py::test_kb_render_pipeline_wired tests/prompt_kb/test_kb_page.py::test_kb_timeline_current_uses_class -v`
+Run: `.venv/bin/pytest tests/prompt_kb/test_kb_page.py::test_kb_render_pipeline_wired tests/prompt_kb/test_kb_page.py::test_kb_timeline_current_uses_class -v`
 Expected: FAIL
 
 - [ ] **Step 3a: 重写 `renderKbResults`（现有 2398-2429 行的整个函数替换为）**
@@ -682,7 +682,7 @@ $("#kb-min-score").addEventListener("input", () => kbRenderFiltered());
 
 - [ ] **Step 4: 跑测试确认通过**
 
-Run: `uv run pytest tests/prompt_kb/ -v`
+Run: `.venv/bin/pytest tests/prompt_kb/ -v`
 Expected: 全部 PASS（含既有锚点测试与新测试）
 
 - [ ] **Step 5: Commit**
@@ -763,7 +763,8 @@ def page(tmp_path_factory):
 
     html = _build_html(tmp_path_factory.mktemp("kb"))
     pw = sync_playwright().start()
-    browser = pw.chromium.launch(headless=True)
+    # 本机 DLP 拦截 Playwright CDN 的浏览器下载;用已安装的 Google Chrome
+    browser = pw.chromium.launch(headless=True, channel="chrome")
     pg = browser.new_page()
     pg.goto(f"file://{html}")
     pg.evaluate("renderKbResults(window.__KB_TEST_GROUPS)")
@@ -832,7 +833,7 @@ def test_empty_state_shows_guidance(page):
 
 - [ ] **Step 2: 跑浏览器测试**
 
-Run: `uv run pytest tests/prompt_kb/test_kb_render_browser.py -v`
+Run: `.venv/bin/pytest tests/prompt_kb/test_kb_render_browser.py -v`
 Expected: 全部 PASS。若 `renderKbResults` 因模板初始化报错不可得，确认是 file:// 下 fetch 失败的运行时错误（函数声明已提升不受影响）；若是语法错误则修复 Task 4 代码。
 
 - [ ] **Step 3: 跑 e2e 验证**
@@ -841,7 +842,7 @@ Expected: 全部 PASS。若 `renderKbResults` 因模板初始化报错不可得�
 
 - [ ] **Step 4: 全量回归**
 
-Run: `uv run pytest tests/ --ignore=tests/test_e2e.py -q`
+Run: `.venv/bin/pytest tests/ --ignore=tests/test_e2e.py -q`
 Expected: 全部 PASS
 
 - [ ] **Step 5: Commit**
