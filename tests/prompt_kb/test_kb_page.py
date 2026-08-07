@@ -75,3 +75,17 @@ def test_kb_new_css_classes_present():
         ".kb-timeline-current", ".kb-btn-primary", ".kb-btn-secondary",
     ):
         assert cls in html, cls
+
+
+def test_kb_render_pipeline_wired():
+    html = read_dashboard_template()
+    for fn in ("kbRenderFiltered", "kbRenderGroupCard", "kbRenderHit", "kbEmptyState"):
+        assert f"function {fn}(" in html, fn
+    assert "kbLastGroups" in html
+    assert '$("#kb-min-score").addEventListener("input"' in html
+    assert "kbFoldGroups(filtered)" in html
+
+
+def test_kb_timeline_current_uses_class():
+    html = read_dashboard_template()
+    assert 'item.classList.add("kb-timeline-current")' in html

@@ -2465,7 +2465,18 @@ async function kbLoadStatus() {
     return;
   }
   const s = data.stats;
-  el.textContent = `${kbEmbedderLabel(data.embedder)} · indexed=${s.indexed} pending=${s.pending} failed=${s.failed} · snapshots=${s.snapshots}`;
+  el.innerHTML = "";
+  el.classList.add("kb-status-chips");
+  for (const label of [
+    kbEmbedderLabel(data.embedder),
+    `indexed=${s.indexed} pending=${s.pending} failed=${s.failed}`,
+    `snapshots=${s.snapshots}`,
+  ]) {
+    const chip = document.createElement("span");
+    chip.className = "kb-chip";
+    chip.textContent = label;
+    el.appendChild(chip);
+  }
 }
 
 function kbEmbedderLabel(embedder) {
@@ -2488,7 +2499,10 @@ async function kbSearch() {
   const resp = await fetch(`/api/kb/search?${params}`);
   const data = await resp.json();
   if (resp.status === 501 || resp.status === 409) {
-    $("#kb-results").textContent = data.hint || data.error;
+    kbLastGroups = [];
+    const container = $("#kb-results");
+    container.innerHTML = "";
+    container.appendChild(kbEmptyState("⚠️", data.hint || data.error));
     return;
   }
   renderKbResults(data.results || []);
@@ -2527,36 +2541,147 @@ function kbScoreClass(score) {
   return "score-low";
 }
 
+let kbLastGroups = [];
+
 function renderKbResults(results) {
+  kbLastGroups = results || [];
+  kbRenderFiltered();
+}
+
+function kbRenderFiltered() {
   const container = $("#kb-results");
   container.innerHTML = "";
-  if (!results.length) {
-    container.textContent = t("kb_no_results");
+  const slider = $("#kb-min-score");
+  const minScore = slider ? parseFloat(slider.value) : 0;
+  $("#kb-min-score-val").textContent = minScore.toFixed(2);
+
+  if (!kbLastGroups.length) {
+    container.appendChild(kbEmptyState(`📭 ${t("kb_no_results_title")}`, t("kb_no_results_hint")));
     return;
   }
-  for (const group of results) {
-    const card = document.createElement("div");
-    card.className = "kb-group";
-    const header = document.createElement("div");
-    header.textContent = `${group.client} / ${group.model} · ${t("kb_first_seen")} ${fmtTime(group.first_seen)} · sessions ${group.session_count}`;
-    card.appendChild(header);
-    for (const hit of group.hits) {
-      const hitEl = document.createElement("div");
-      hitEl.className = "kb-hit";
-      const badge = document.createElement("span");
-      badge.className = "kb-hit-kind";
-      badge.textContent = hit.kind === "tool" ? t("kb_kind_tool") : t("kb_kind_prompt");
-      hitEl.appendChild(badge);
-      hitEl.appendChild(document.createTextNode(
-        `${hit.title} (${hit.score.toFixed(3)}) — ${hit.text.slice(0, 200)}`));
-      card.appendChild(hitEl);
-    }
-    const timelineBtn = document.createElement("button");
-    timelineBtn.textContent = t("kb_timeline");
-    timelineBtn.addEventListener("click", () => kbLoadTimeline(group, card));
-    card.appendChild(timelineBtn);
-    container.appendChild(card);
+  const totalHits = kbLastGroups.reduce((n, g) => n + (g.hits || []).length, 0);
+  const filtered = kbLastGroups.map(g => kbFilterHits(g, minScore)).filter(g => g.hits.length);
+  const shownHits = filtered.reduce((n, g) => n + g.hits.length, 0);
+  const hiddenHits = totalHits - shownHits;
+  if (!filtered.length) {
+    container.appendChild(kbEmptyState(
+      `📭 ${t("kb_no_results_title")}`,
+      t("kb_filtered_by_score", { n: hiddenHits })
+    ));
+    return;
   }
+  const folded = kbFoldGroups(filtered);
+  const foldedCount = folded.reduce((n, f) => n + f.history.length, 0);
+  const summary = document.createElement("div");
+  summary.className = "kb-summary";
+  summary.textContent = t("kb_summary", { n: folded.length })
+    + (foldedCount ? t("kb_summary_folded", { m: foldedCount }) : "")
+    + (hiddenHits ? " · " + t("kb_filtered_by_score", { n: hiddenHits }) : "");
+  container.appendChild(summary);
+  for (const { main, history } of folded) {
+    container.appendChild(kbRenderGroupCard(main, true, history));
+  }
+}
+
+function kbEmptyState(title, hint) {
+  const box = document.createElement("div");
+  box.className = "kb-empty";
+  const titleEl = document.createElement("div");
+  titleEl.className = "kb-empty-title";
+  titleEl.textContent = title;
+  const hintEl = document.createElement("div");
+  hintEl.textContent = hint;
+  box.append(titleEl, hintEl);
+  return box;
+}
+
+function kbRenderGroupCard(group, isLatest, history = []) {
+  const card = document.createElement("div");
+  card.className = "kb-group";
+  const header = document.createElement("div");
+  header.className = "kb-group-header";
+  const title = document.createElement("span");
+  title.className = "kb-group-title";
+  title.textContent = `${group.client} / ${group.model}`;
+  header.appendChild(title);
+  if (isLatest) {
+    const badge = document.createElement("span");
+    badge.className = "kb-latest-badge";
+    badge.textContent = t("kb_latest");
+    header.appendChild(badge);
+  }
+  const meta = document.createElement("span");
+  meta.className = "kb-group-meta";
+  meta.textContent = `${t("kb_first_seen")} ${fmtTime(group.first_seen)} · sessions ${group.session_count}`;
+  header.appendChild(meta);
+  card.appendChild(header);
+  for (const hit of group.hits) card.appendChild(kbRenderHit(hit));
+
+  const timelineBtn = document.createElement("button");
+  timelineBtn.className = "kb-btn-secondary kb-timeline-btn";
+  timelineBtn.textContent = t("kb_timeline");
+  timelineBtn.addEventListener("click", () => kbLoadTimeline(group, card));
+  card.appendChild(timelineBtn);
+
+  if (history.length) {
+    const fold = document.createElement("details");
+    fold.className = "kb-history-fold";
+    const summaryEl = document.createElement("summary");
+    summaryEl.textContent = `▸ ${t("kb_history_snapshots", { n: history.length })}`;
+    fold.appendChild(summaryEl);
+    for (const g of history) fold.appendChild(kbRenderGroupCard(g, false, []));
+    card.appendChild(fold);
+  }
+  return card;
+}
+
+function kbRenderHit(hit) {
+  const row = document.createElement("div");
+  row.className = "kb-hit";
+  const head = document.createElement("div");
+  head.className = "kb-hit-head";
+  const badge = document.createElement("span");
+  badge.className = `kb-hit-kind ${hit.kind === "tool" ? "tool" : "prompt"}`;
+  badge.textContent = hit.kind === "tool" ? t("kb_kind_tool") : t("kb_kind_prompt");
+  const title = document.createElement("span");
+  title.className = "kb-hit-title";
+  title.textContent = hit.title;
+  const score = document.createElement("span");
+  score.className = `kb-score ${kbScoreClass(hit.score)}`;
+  const bar = document.createElement("span");
+  bar.className = "kb-score-bar";
+  const fill = document.createElement("span");
+  fill.className = "kb-score-fill";
+  fill.style.width = `${Math.round(Math.max(0, Math.min(1, hit.score)) * 100)}%`;
+  bar.appendChild(fill);
+  const num = document.createElement("span");
+  num.className = "kb-score-num";
+  num.textContent = hit.score.toFixed(3);
+  score.append(bar, num);
+  head.append(badge, title, score);
+  row.appendChild(head);
+
+  const PREVIEW = 200;
+  const full = hit.text || "";
+  const text = document.createElement("div");
+  text.className = "kb-hit-text";
+  text.textContent = full.length > PREVIEW ? full.slice(0, PREVIEW) + "…" : full;
+  row.appendChild(text);
+  if (full.length > PREVIEW) {
+    const btn = document.createElement("button");
+    btn.className = "kb-expand-btn";
+    btn.type = "button";
+    btn.textContent = `▸ ${t("kb_expand")}`;
+    btn.addEventListener("click", () => {
+      const expanded = btn.dataset.expanded === "1";
+      btn.dataset.expanded = expanded ? "0" : "1";
+      text.textContent = expanded ? full.slice(0, PREVIEW) + "…" : full;
+      text.classList.toggle("full", !expanded);
+      btn.textContent = expanded ? `▸ ${t("kb_expand")}` : `▾ ${t("kb_collapse")}`;
+    });
+    row.appendChild(btn);
+  }
+  return row;
 }
 
 async function kbLoadTimeline(group, card) {
@@ -2573,7 +2698,7 @@ async function kbLoadTimeline(group, card) {
   for (const v of data.versions || []) {
     const item = document.createElement("li");
     item.textContent = `${fmtTime(v.first_seen)} · sessions ${v.session_count} · ${v.content_hash.slice(0, 8)}`;
-    if (v.id === group.snapshot_id) item.style.fontWeight = "bold";
+    if (v.id === group.snapshot_id) item.classList.add("kb-timeline-current");
     list.appendChild(item);
   }
   card.appendChild(list);
@@ -3001,6 +3126,7 @@ document.addEventListener("keydown", event => {
 $("#theme-toggle").addEventListener("click", toggleTheme);
 $("#kb-search-btn").addEventListener("click", () => kbSearch().catch(console.error));
 $("#kb-query").addEventListener("keydown", e => { if (e.key === "Enter") kbSearch().catch(console.error); });
+$("#kb-min-score").addEventListener("input", () => kbRenderFiltered());
 $("#kb-reindex-btn").addEventListener("click", async () => {
   await fetch("/api/kb/reindex", {method: "POST"});
   await kbLoadStatus();
