@@ -1019,6 +1019,7 @@ pre {
 }
 .kb-btn-secondary:hover { border-color: var(--blue); color: var(--blue); }
 .kb-timeline-btn { align-self: flex-start; }
+.kb-status { font-size: 12px; color: var(--text-secondary); }
 .kb-status-chips { display: flex; gap: 8px; flex-wrap: wrap; }
 .kb-chip {
   font-size: 11px; font-family: var(--mono); padding: 2px 8px; border-radius: 10px;
@@ -1492,7 +1493,6 @@ const DASHBOARD_I18N = {
     kb_search_placeholder: "Search prompt rules or tool definitions…",
     kb_kind_all: "All", kb_kind_tool: "Tool", kb_kind_prompt: "Prompt section",
     kb_search_btn: "Search", kb_reindex_btn: "Reindex",
-    kb_no_results: "No matching results",
     kb_first_seen: "first seen",
     kb_timeline: "Version history",
     kb_unavailable: "Knowledge base unavailable: ",
@@ -1632,7 +1632,6 @@ const DASHBOARD_I18N = {
     kb_search_placeholder: "搜索 prompt 规则或工具定义…",
     kb_kind_all: "全部", kb_kind_tool: "工具", kb_kind_prompt: "Prompt 段落",
     kb_search_btn: "搜索", kb_reindex_btn: "重建索引",
-    kb_no_results: "没有命中的结果",
     kb_first_seen: "首次出现",
     kb_timeline: "版本历史",
     kb_unavailable: "知识库不可用：",
@@ -2541,7 +2540,7 @@ function kbScoreClass(score) {
   return "score-low";
 }
 
-let kbLastGroups = [];
+let kbLastGroups = null;
 
 function renderKbResults(results) {
   kbLastGroups = results || [];
@@ -2549,11 +2548,13 @@ function renderKbResults(results) {
 }
 
 function kbRenderFiltered() {
-  const container = $("#kb-results");
-  container.innerHTML = "";
   const slider = $("#kb-min-score");
   const minScore = slider ? parseFloat(slider.value) : 0;
-  $("#kb-min-score-val").textContent = minScore.toFixed(2);
+  const valEl = $("#kb-min-score-val");
+  if (valEl) valEl.textContent = minScore.toFixed(2);
+  if (kbLastGroups === null) return;  // no search yet — nothing to filter, leave container untouched
+  const container = $("#kb-results");
+  container.innerHTML = "";
 
   if (!kbLastGroups.length) {
     container.appendChild(kbEmptyState(`📭 ${t("kb_no_results_title")}`, t("kb_no_results_hint")));
@@ -2691,8 +2692,21 @@ async function kbLoadTimeline(group, card) {
     return;
   }
   const params = new URLSearchParams({ client: group.client, model: group.model });
-  const resp = await fetch(`/api/kb/timeline?${params}`);
-  const data = await resp.json();
+  let data;
+  try {
+    const resp = await fetch(`/api/kb/timeline?${params}`);
+    data = await resp.json();
+  } catch (err) {
+    if (!card.querySelector("ul.kb-timeline")) {
+      const list = document.createElement("ul");
+      list.className = "kb-timeline";
+      const item = document.createElement("li");
+      item.textContent = t("kb_unavailable") + String(err);
+      list.appendChild(item);
+      card.appendChild(list);
+    }
+    return;
+  }
   const list = document.createElement("ul");
   list.className = "kb-timeline";
   for (const v of data.versions || []) {

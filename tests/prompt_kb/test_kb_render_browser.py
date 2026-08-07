@@ -54,7 +54,7 @@ def page(tmp_path_factory):
 
     html = _build_html(tmp_path_factory.mktemp("kb"))
     pw = sync_playwright().start()
-    # 本机 DLP 拦截 Playwright CDN 的浏览器下载;用已安装的 Google Chrome
+    # Playwright's CDN browser download is blocked by the local DLP proxy; use installed Google Chrome
     browser = pw.chromium.launch(headless=True, channel="chrome")
     pg = browser.new_page()
     pg.goto(f"file://{html}")
