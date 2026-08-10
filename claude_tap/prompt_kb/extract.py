@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from claude_tap.prompt_kb.chunk import chunk_snapshot, content_hash
+from claude_tap.prompt_kb.messages import extract_user_messages, message_content_hash
 from claude_tap.prompt_kb.store import KbStore
 from claude_tap.prompt_snapshot import snapshot_from_records
 from claude_tap.trace_store import TraceStore
@@ -17,6 +18,38 @@ logger = logging.getLogger(__name__)
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def extract_messages(
+    store: KbStore, *, session_id: str, client: str, records: list[dict[str, Any]]
+) -> int:
+    """Store user messages from a session's records into kb_messages.
+
+    Returns the number of newly created (non-deduped) message chunks.
+    """
+    created = 0
+    for msg in extract_user_messages(records):
+        body = _record_model(records[msg.record_index])
+        _id, was_created = store.upsert_message(
+            session_id=session_id,
+            record_index=msg.record_index,
+            message_index=msg.message_index,
+            client=client,
+            model=body,
+            timestamp=msg.timestamp,
+            content_hash=message_content_hash(msg.text),
+            text=msg.text,
+            seen_at=msg.timestamp or datetime.now(timezone.utc).isoformat(),
+        )
+        if was_created:
+            created += 1
+    return created
+
+
+def _record_model(record: dict[str, Any]) -> str:
+    req = record.get("request") if isinstance(record.get("request"), dict) else {}
+    body = req.get("body") if isinstance(req.get("body"), dict) else {}
+    return str(body.get("model") or "")
 
 
 def extract_session(
@@ -45,6 +78,9 @@ def extract_session(
     if created:
         chunks = chunk_snapshot(snapshot)
         store.replace_chunks(snapshot_id, [(c.kind, c.title, c.text) for c in chunks])
+    # Message extraction runs before record_source: on failure the session
+    # stays unprocessed and is retried next pass (same semantics as snapshots).
+    extract_messages(store, session_id=session_id, client=client, records=records)
     store.record_source(session_id, snapshot_id, processed_at)
     return snapshot_id
 
