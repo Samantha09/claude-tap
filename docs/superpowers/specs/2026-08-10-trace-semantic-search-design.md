@@ -122,16 +122,16 @@ requeue_failed_messages / indexed_messages / reset_message_embeddings`。
 
 ### 检索(`prompt_kb/search.py`)
 
-- `search()` 返回值新增 `messages` 分区(见 API);提示词分区逻辑不变
-- 新增私有 `search_messages()`:对 `indexed_messages()` 做暴力余弦,按 session
-  分组(每组最多 3 条 hit),支持 client 过滤与 `min_score`;与 prompt 路相同的
-  `_check_embedder_meta` 前置校验
+- `search()` 签名与返回不变;新增 `search_messages()` 返回会话消息分区结果,
+  API/CLI 层组合两路输出(向后兼容)。`search_messages()` 对
+  `indexed_messages()` 做暴力余弦,按 session 分组(每组最多 3 条 hit),支持
+  client 过滤与 `min_score`,与 prompt 路相同的 `_check_embedder_meta` 前置校验
 - 两路查询都是独立私有函数,未来换 sqlite-vec 只改函数内部实现,接口不动
 
 ### API(`live.py`)
 
-- `GET /api/kb/search` 响应扩展为 `{"snapshots": [...], "messages": [...]}`;
-  该端点的消费者只有 dashboard.html 与 kb CLI,同步更新,不做版本兼容
+- `GET /api/kb/search` 响应在现有 `results` 键之外新增 `messages` 键;
+  现有消费者(dashboard.html、kb CLI、测试)不受影响
 - `GET /api/kb/status` 增加 `messages` 计数
 - `POST /api/kb/reindex` 同时重建两表(复用现有 202 后台线程模式)
 - `DELETE /api/sessions/{id}` 级联删除 `kb_messages` 对应行
