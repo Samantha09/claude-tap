@@ -1,4 +1,4 @@
-"""Cosine-similarity search over indexed chunks, grouped by snapshot."""
+"""Cosine-similarity search over indexed chunks and user messages."""
 
 from __future__ import annotations
 
@@ -29,6 +29,29 @@ class SnapshotResult:
     last_seen: str
     session_count: int
     hits: list[SearchHit] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class MessageHit:
+    text: str
+    timestamp: str
+    score: float
+
+
+@dataclass
+class SessionResult:
+    session_id: str
+    client: str
+    model: str
+    hits: list[MessageHit] = field(default_factory=list)
+
+
+def _cosine_scores(matrix, query_vec):
+    import numpy as np
+    q_norm = np.linalg.norm(query_vec) or 1.0
+    m_norms = np.linalg.norm(matrix, axis=1)
+    m_norms[m_norms == 0] = 1.0
+    return (matrix @ query_vec) / (m_norms * q_norm)
 
 
 def _check_embedder_meta(store: KbStore, embedder: Embedder) -> None:
@@ -70,10 +93,7 @@ def search(
     matrix = np.array([np.frombuffer(row["embedding"], dtype=np.float32) for row in rows])
     embed_query = getattr(embedder, "embed_query", None) or embedder.embed
     query_vec = np.array(embed_query([query])[0], dtype=np.float32)
-    q_norm = np.linalg.norm(query_vec) or 1.0
-    m_norms = np.linalg.norm(matrix, axis=1)
-    m_norms[m_norms == 0] = 1.0
-    scores = (matrix @ query_vec) / (m_norms * q_norm)
+    scores = _cosine_scores(matrix, query_vec)
 
     groups: dict[int, SnapshotResult] = {}
     for row, score in zip(rows, scores):
@@ -97,6 +117,58 @@ def search(
                 text=row["text"],
                 score=float(score),
             )
+        )
+    ordered = sorted(
+        groups.values(),
+        key=lambda g: max((h.score for h in g.hits), default=0.0),
+        reverse=True,
+    )
+    for group in ordered:
+        group.hits = sorted(group.hits, key=lambda h: h.score, reverse=True)[:3]
+    return ordered[:limit]
+
+
+def search_messages(
+    store: KbStore,
+    embedder: Embedder,
+    query: str,
+    *,
+    client: str | None = None,
+    limit: int = 10,
+    min_score: float = 0.0,
+) -> list[SessionResult]:
+    """Cosine-similarity search over indexed user messages, grouped by session."""
+    _check_embedder_meta(store, embedder)
+    rows = store.indexed_messages()
+    if client:
+        rows = [row for row in rows if row["client"] == client]
+    if not rows:
+        return []
+    try:
+        import numpy as np
+    except ImportError as exc:
+        raise EmbedderUnavailable(
+            "numpy is not installed; install the optional dependency: pip install 'claude-tap[rag]'"
+        ) from exc
+    matrix = np.array([np.frombuffer(row["embedding"], dtype=np.float32) for row in rows])
+    embed_query = getattr(embedder, "embed_query", None) or embedder.embed
+    query_vec = np.array(embed_query([query])[0], dtype=np.float32)
+    scores = _cosine_scores(matrix, query_vec)
+
+    groups: dict[str, SessionResult] = {}
+    for row, score in zip(rows, scores):
+        if score <= min_score:
+            continue
+        group = groups.setdefault(
+            row["session_id"],
+            SessionResult(
+                session_id=row["session_id"],
+                client=row["client"],
+                model=row["model"],
+            ),
+        )
+        group.hits.append(
+            MessageHit(text=row["text"], timestamp=row["timestamp"], score=float(score))
         )
     ordered = sorted(
         groups.values(),
