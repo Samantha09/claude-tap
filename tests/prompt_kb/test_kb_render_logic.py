@@ -79,9 +79,36 @@ def test_filter_hits_drops_below_threshold():
     assert [h["score"] for h in filter_hits(g, 0.0)["hits"]] == [0.82, 0.91, 0.65]
 
 
+def filter_message_groups(groups, min_score):
+    return [
+        {**g, "hits": [h for h in g.get("hits", []) if h["score"] >= min_score]}
+        for g in groups
+        if any(h["score"] >= min_score for h in g.get("hits", []))
+    ]
+
+
 def test_score_class_thresholds():
     assert score_class(0.95) == "score-high"
     assert score_class(0.9) == "score-high"
     assert score_class(0.82) == "score-mid"
     assert score_class(0.7) == "score-mid"
     assert score_class(0.69) == "score-low"
+
+
+def test_filter_message_groups():
+    groups = [
+        {"session_id": "s1", "hits": [{"score": 0.9}, {"score": 0.3}]},
+        {"session_id": "s2", "hits": [{"score": 0.2}]},
+    ]
+    filtered = filter_message_groups(groups, 0.5)
+    assert [g["session_id"] for g in filtered] == ["s1"]
+    assert len(filtered[0]["hits"]) == 1
+
+
+def test_template_contains_message_rendering():
+    from claude_tap.dashboard import read_dashboard_template
+    html = read_dashboard_template()
+    assert "kbRenderMessageCard" in html
+    assert "kb_messages_section" in html
+    assert "kb_view_session" in html
+    assert "kbFilterMessageGroups" in html

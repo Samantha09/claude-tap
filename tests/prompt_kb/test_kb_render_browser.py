@@ -122,3 +122,41 @@ def test_empty_state_shows_guidance(page):
     assert page.eval_on_selector_all(".kb-empty", "els => els.length") == 1
     hint = page.eval_on_selector(".kb-empty", "el => el.textContent")
     assert len(hint) > 10
+
+
+MESSAGES = [
+    {
+        "session_id": "sess-abc", "client": "claude", "model": "k3-256k",
+        "hits": [
+            {"text": "how do I fix the race condition in the worker pool",
+             "timestamp": "2026-08-09T10:00:00Z", "score": 0.87},
+        ],
+    },
+]
+
+
+def test_kb_message_section_rendered(page, tmp_path):
+    html_path = tmp_path / "dashboard.html"
+    html_path.write_text(read_dashboard_template(), encoding="utf-8")
+    page.goto(f"file://{html_path}")
+    # KB section starts hidden (tab UI); reveal it so inner_text sees rendered text
+    page.evaluate("document.querySelector('#kb-view').classList.remove('hidden')")
+    page.evaluate(
+        """([groups, messages]) => {
+            kbLastGroups = groups;
+            renderKbResults(groups, messages);
+        }""",
+        [GROUPS, MESSAGES],
+    )
+    # default UI language is zh-CN
+    section = page.locator(".kb-section-title", has_text="会话")
+    assert section.count() == 1
+    card = page.locator(".kb-message-group")
+    assert card.count() == 1
+    link = card.locator("a.kb-session-link")
+    assert link.get_attribute("href") == "/dashboard/session/sess-abc"
+    assert "race condition" in card.locator(".kb-hit-text").inner_text()
+    assert card.locator(".kb-hit-kind.message").count() == 1
+    # en dictionary renders the same section as "Sessions"
+    page.evaluate("() => { setLang('en'); kbRenderFiltered(); }")
+    assert page.locator(".kb-section-title", has_text="Sessions").count() == 1
