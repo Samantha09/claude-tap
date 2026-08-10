@@ -40,11 +40,41 @@ def index_pending(store: KbStore, embedder: Embedder, *, batch_size: int = 32) -
         for row, blob in zip(batch, vectors_to_blob(vectors)):
             store.mark_chunk_indexed(row["id"], blob)
         indexed += len(batch)
-    return {"indexed": indexed, "failed": failed, "remaining": store.stats()["pending"]}
+    messages_indexed, messages_failed = _index_pending_messages(store, embedder, batch_size)
+    return {
+        "indexed": indexed,
+        "failed": failed,
+        "messages_indexed": messages_indexed,
+        "messages_failed": messages_failed,
+        "remaining": store.stats()["pending"],
+    }
+
+
+def _index_pending_messages(store: KbStore, embedder: Embedder, batch_size: int) -> tuple[int, int]:
+    """Embed pending user messages; same retry semantics as chunk indexing."""
+    indexed = failed = 0
+    store.requeue_failed_messages()
+    while True:
+        batch = store.pending_messages(batch_size)
+        if not batch:
+            break
+        try:
+            vectors = embedder.embed([row["text"] for row in batch])
+        except Exception:  # noqa: BLE001 - one bad batch must not stop indexing
+            logger.warning("message embedding batch failed", exc_info=True)
+            for row in batch:
+                store.mark_message_failed(row["id"])
+            failed += len(batch)
+            continue
+        for row, blob in zip(batch, vectors_to_blob(vectors)):
+            store.mark_message_indexed(row["id"], blob)
+        indexed += len(batch)
+    return indexed, failed
 
 
 def rebuild_index(store: KbStore, embedder: Embedder) -> dict:
     store.reset_embeddings()
+    store.reset_message_embeddings()
     return index_pending(store, embedder)
 
 
