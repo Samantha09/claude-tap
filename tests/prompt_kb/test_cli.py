@@ -44,6 +44,25 @@ def test_kb_reindex(seeded_kb, capsys):
     assert "indexed=1" in capsys.readouterr().out
 
 
+def test_kb_search_prints_message_section(trace_db, monkeypatch, capsys):
+    store = KbStore.default()
+    embedder = FakeEmbedder()
+    ensure_embedder_meta(store, embedder)
+    store.upsert_message(
+        session_id="sess-1", record_index=0, message_index=0,
+        client="claude", model="k3", timestamp="2026-08-10T01:00:00Z",
+        content_hash="h1", text="how to fix the race condition",
+        seen_at="t",
+    )
+    index_pending(store, embedder)
+    monkeypatch.setattr("claude_tap.prompt_kb.cli.create_embedder", lambda config: embedder)
+    rc = kb_main(["search", "race condition"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "messages:" in out
+    assert "sess-1" in out
+
+
 def test_kb_search_embedder_unavailable(trace_db, monkeypatch, capsys):
     from claude_tap.prompt_kb.embed import EmbedderUnavailable
 
