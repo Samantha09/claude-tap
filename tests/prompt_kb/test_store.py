@@ -43,7 +43,7 @@ def test_chunks_lifecycle(trace_db):
     assert len(pending) == 2
     store.mark_chunk_indexed(pending[0]["id"], b"\x00" * 64)
     store.mark_chunk_failed(pending[1]["id"])
-    assert store.stats() == {"snapshots": 1, "chunks": 2, "pending": 0, "failed": 1, "indexed": 1}
+    assert store.stats() == {"snapshots": 1, "chunks": 2, "pending": 0, "failed": 1, "indexed": 1, "messages": 0}
     assert len(store.indexed_chunks()) == 1
     assert store.reset_embeddings() == 2
     assert store.stats()["pending"] == 2

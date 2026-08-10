@@ -47,6 +47,24 @@ CREATE TABLE IF NOT EXISTS kb_meta (
   key TEXT PRIMARY KEY,
   value TEXT
 );
+CREATE TABLE IF NOT EXISTS kb_messages (
+  id INTEGER PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  record_index INTEGER NOT NULL,
+  message_index INTEGER NOT NULL,
+  client TEXT NOT NULL,
+  model TEXT NOT NULL,
+  timestamp TEXT NOT NULL,
+  content_hash TEXT NOT NULL,
+  text TEXT NOT NULL,
+  last_seen TEXT NOT NULL,
+  embedding BLOB,
+  index_state TEXT NOT NULL DEFAULT 'pending',
+  attempts INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_kb_messages_state ON kb_messages(index_state);
+CREATE INDEX IF NOT EXISTS idx_kb_messages_session ON kb_messages(session_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_kb_messages_dedup ON kb_messages(content_hash, client);
 """
 
 
@@ -180,6 +198,85 @@ class KbStore:
             cur = conn.execute("UPDATE kb_chunks SET embedding=NULL, index_state='pending', attempts=0")
             return cur.rowcount
 
+    def upsert_message(
+        self, *, session_id: str, record_index: int, message_index: int,
+        client: str, model: str, timestamp: str, content_hash: str,
+        text: str, seen_at: str,
+    ) -> tuple[int, bool]:
+        """Insert a user-message chunk; dedup on (content_hash, client).
+
+        Returns (message_id, created). On dedup hit only last_seen is updated
+        and the first-seen session_id is kept.
+        """
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT id FROM kb_messages WHERE content_hash=? AND client=?",
+                (content_hash, client),
+            ).fetchone()
+            if row is not None:
+                conn.execute(
+                    "UPDATE kb_messages SET last_seen=? WHERE id=?",
+                    (seen_at, row["id"]),
+                )
+                return int(row["id"]), False
+            cur = conn.execute(
+                """INSERT INTO kb_messages
+                   (session_id, record_index, message_index, client, model,
+                    timestamp, content_hash, text, last_seen)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (session_id, record_index, message_index, client, model,
+                 timestamp, content_hash, text, seen_at),
+            )
+            return int(cur.lastrowid), True
+
+    def pending_messages(self, limit: int) -> list[sqlite3.Row]:
+        with self._connect() as conn:
+            return conn.execute(
+                "SELECT id, session_id, text, last_seen FROM kb_messages WHERE index_state='pending' ORDER BY id LIMIT ?",
+                (limit,),
+            ).fetchall()
+
+    def mark_message_indexed(self, message_id: int, embedding: bytes) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE kb_messages SET embedding=?, index_state='indexed' WHERE id=?",
+                (embedding, message_id),
+            )
+
+    def mark_message_failed(self, message_id: int) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE kb_messages SET index_state='failed', attempts=attempts+1 WHERE id=?",
+                (message_id,),
+            )
+
+    def requeue_failed_messages(self) -> int:
+        with self._connect() as conn:
+            cur = conn.execute(
+                "UPDATE kb_messages SET index_state='pending' WHERE index_state='failed' AND attempts < ?",
+                (self.MAX_ATTEMPTS,),
+            )
+            return cur.rowcount
+
+    def indexed_messages(self) -> list[sqlite3.Row]:
+        with self._connect() as conn:
+            return conn.execute(
+                """SELECT id, session_id, client, model, timestamp, text, embedding
+                   FROM kb_messages WHERE index_state='indexed'"""
+            ).fetchall()
+
+    def reset_message_embeddings(self) -> int:
+        with self._connect() as conn:
+            cur = conn.execute(
+                "UPDATE kb_messages SET embedding=NULL, index_state='pending', attempts=0"
+            )
+            return cur.rowcount
+
+    def delete_messages_for_session(self, session_id: str) -> int:
+        with self._connect() as conn:
+            cur = conn.execute("DELETE FROM kb_messages WHERE session_id=?", (session_id,))
+            return cur.rowcount
+
     def get_meta(self, key: str) -> str | None:
         with self._connect() as conn:
             row = conn.execute("SELECT value FROM kb_meta WHERE key=?", (key,)).fetchone()
@@ -215,4 +312,7 @@ class KbStore:
                 "pending": int(by_state.get("pending", 0)),
                 "failed": int(by_state.get("failed", 0)),
                 "indexed": int(by_state.get("indexed", 0)),
+                "messages": int(
+                    conn.execute("SELECT COUNT(*) c FROM kb_messages").fetchone()["c"]
+                ),
             }
