@@ -87,3 +87,49 @@ async def test_kb_timeline_route(trace_db, seeded_kb, tmp_path):
         assert payload["versions"][0]["first_seen"] == "2026-08-01T00:00:00Z"
     finally:
         await server.stop()
+
+
+@pytest.fixture()
+def seeded_kb_messages(trace_db, monkeypatch):
+    store = KbStore.default()
+    embedder = FakeEmbedder()
+    ensure_embedder_meta(store, embedder)
+    store.upsert_message(
+        session_id="sess-abc", record_index=0, message_index=0,
+        client="claude", model="k3", timestamp="2026-08-10T01:00:00Z",
+        content_hash="h1", text="how to fix the race condition",
+        seen_at="2026-08-10T01:00:00Z",
+    )
+    index_pending(store, embedder)
+    monkeypatch.setattr("claude_tap.live.create_embedder", lambda config: embedder)
+    return embedder
+
+
+async def test_kb_search_includes_messages(trace_db, seeded_kb_messages, tmp_path):
+    server = LiveViewerServer(port=0, migrate_from=tmp_path, dashboard_mode=True)
+    port = await server.start()
+    try:
+        status, payload = await _get_json(port, "/api/kb/search?q=race+condition")
+        assert status == 200
+        assert "messages" in payload
+        assert payload["messages"][0]["session_id"] == "sess-abc"
+        assert payload["messages"][0]["hits"][0]["text"]
+        assert payload["results"] == []  # prompt partition still present
+    finally:
+        await server.stop()
+
+
+async def test_delete_session_cascades_kb_messages(trace_db, seeded_kb_messages, tmp_path):
+    store = KbStore.default()
+    assert store.stats()["messages"] == 1
+    server = LiveViewerServer(port=0, migrate_from=tmp_path, dashboard_mode=True)
+    port = await server.start()
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.delete(
+                f"http://127.0.0.1:{port}/api/sessions/sess-abc"
+            ) as resp:
+                assert resp.status in (200, 404)  # 404 if trace session absent; cascade must still run
+        assert store.stats()["messages"] == 0
+    finally:
+        await server.stop()

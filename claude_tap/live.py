@@ -32,6 +32,7 @@ from claude_tap.prompt_kb.embed import EmbedderUnavailable, create_embedder, loa
 from claude_tap.prompt_kb.index import ensure_embedder_meta, rebuild_index, run_index_loop
 from claude_tap.prompt_kb.search import ReindexRequired
 from claude_tap.prompt_kb.search import search as kb_search
+from claude_tap.prompt_kb.search import search_messages as kb_search_messages
 from claude_tap.prompt_kb.store import KbStore
 from claude_tap.shared_dashboard import CLAUDE_TAP_VERSION, dashboard_url
 from claude_tap.trace_store import get_trace_store, resolve_db_path
@@ -196,6 +197,20 @@ def _session_query_from_request(request: web.Request):
         search=request.query.get("search", ""),
         agent=request.query.get("agent", ""),
     )
+
+
+def _delete_kb_messages_quietly(session_ids: list[str]) -> None:
+    """Cascade-delete KB message rows; KB failures must never block trace deletion."""
+    try:
+        store = KbStore.default()
+    except Exception:  # noqa: BLE001
+        logger.exception("kb store unavailable during session cascade delete")
+        return
+    for sid in session_ids:
+        try:
+            store.delete_messages_for_session(sid)
+        except Exception:  # noqa: BLE001
+            logger.exception("kb message cascade delete failed for session %s", sid)
 
 
 class LiveViewerServer:
@@ -600,6 +615,14 @@ class LiveViewerServer:
                 limit=int(request.query.get("limit", "10")),
                 min_score=min_score,
             )
+            messages = kb_search_messages(
+                KbStore.default(),
+                embedder,
+                query,
+                client=request.query.get("client") or None,
+                limit=int(request.query.get("limit", "10")),
+                min_score=min_score,
+            )
         except EmbedderUnavailable as exc:
             # search() may raise here too (api embedder without numpy).
             return self._kb_unavailable_response(exc)
@@ -623,7 +646,19 @@ class LiveViewerServer:
                         ],
                     }
                     for group in results
-                ]
+                ],
+                "messages": [
+                    {
+                        "session_id": group.session_id,
+                        "client": group.client,
+                        "model": group.model,
+                        "hits": [
+                            {"text": h.text, "timestamp": h.timestamp, "score": h.score}
+                            for h in group.hits
+                        ],
+                    }
+                    for group in messages
+                ],
             }
         )
 
@@ -824,12 +859,15 @@ class LiveViewerServer:
         store = ensure_trace_store()
         row = store.load_session_row(session_id)
         if row is None:
+            # The session may exist only in the KB; cascade must still run.
+            _delete_kb_messages_quietly([session_id])
             return web.json_response({"error": "Session not found"}, status=404)
         if self.session_id and session_id == self.session_id:
             return web.json_response({"error": "Live session cannot be deleted"}, status=409)
         if _session_row_blocks_delete(row, live_session_id=None):
             return web.json_response({"error": "Active session cannot be deleted"}, status=409)
         result = store.delete_session(session_id)
+        _delete_kb_messages_quietly([session_id])
         await self._broadcast_dashboard_event({"type": "refresh"})
         return web.json_response(result)
 
@@ -875,6 +913,7 @@ class LiveViewerServer:
             )
 
         result = store.delete_sessions(deletable_ids)
+        _delete_kb_messages_quietly(deletable_ids)
         result["missing_sessions"] = [*missing_ids, *result.get("missing_sessions", [])]
         result["skipped_active_sessions"] = skipped_active
         await self._broadcast_dashboard_event({"type": "refresh"})
