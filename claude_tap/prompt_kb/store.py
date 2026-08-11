@@ -41,7 +41,8 @@ CREATE INDEX IF NOT EXISTS idx_kb_chunks_state ON kb_chunks(index_state);
 CREATE TABLE IF NOT EXISTS kb_sources (
   session_id TEXT PRIMARY KEY,
   snapshot_id INTEGER REFERENCES kb_snapshots(id),
-  processed_at TEXT NOT NULL
+  processed_at TEXT NOT NULL,
+  messages_done INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS kb_meta (
   key TEXT PRIMARY KEY,
@@ -90,6 +91,9 @@ class KbStore:
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(kb_chunks)")}
         if "attempts" not in columns:
             conn.execute("ALTER TABLE kb_chunks ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0")
+        source_columns = {row["name"] for row in conn.execute("PRAGMA table_info(kb_sources)")}
+        if "messages_done" not in source_columns:
+            conn.execute("ALTER TABLE kb_sources ADD COLUMN messages_done INTEGER NOT NULL DEFAULT 0")
 
     @classmethod
     def default(cls) -> "KbStore":
@@ -145,11 +149,31 @@ class KbStore:
             row = conn.execute("SELECT 1 FROM kb_sources WHERE session_id=?", (session_id,)).fetchone()
             return row is not None
 
-    def record_source(self, session_id: str, snapshot_id: int | None, processed_at: str) -> None:
+    def record_source(
+        self, session_id: str, snapshot_id: int | None, processed_at: str, *, messages_done: bool = False
+    ) -> None:
         with self._connect() as conn:
             conn.execute(
-                "INSERT OR REPLACE INTO kb_sources (session_id, snapshot_id, processed_at) VALUES (?, ?, ?)",
-                (session_id, snapshot_id, processed_at),
+                "INSERT OR REPLACE INTO kb_sources (session_id, snapshot_id, processed_at, messages_done)"
+                " VALUES (?, ?, ?, ?)",
+                (session_id, snapshot_id, processed_at, 1 if messages_done else 0),
+            )
+
+    def sources_missing_messages(self, limit: int = 50) -> list[str]:
+        """Session ids recorded before message extraction existed (or whose
+        backfill failed); the lazy loop backfills user messages for these."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT session_id FROM kb_sources WHERE messages_done = 0 LIMIT ?",
+                (limit,),
+            ).fetchall()
+            return [str(row["session_id"]) for row in rows]
+
+    def mark_source_messages_done(self, session_id: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE kb_sources SET messages_done = 1 WHERE session_id = ?",
+                (session_id,),
             )
 
     def pending_chunks(self, limit: int) -> list[sqlite3.Row]:

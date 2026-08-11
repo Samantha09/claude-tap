@@ -1,3 +1,5 @@
+import sqlite3
+
 from claude_tap.prompt_kb.store import KbStore
 
 
@@ -54,6 +56,37 @@ def test_sources_mark_processed(trace_db):
     assert store.is_source_processed("s1") is False
     store.record_source("s1", None, "2026-08-06T00:00:00Z")
     assert store.is_source_processed("s1") is True
+
+
+def test_migrate_adds_messages_done_to_legacy_db(tmp_path):
+    db = tmp_path / "kb.sqlite3"
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "CREATE TABLE kb_sources (session_id TEXT PRIMARY KEY, snapshot_id INTEGER, processed_at TEXT NOT NULL)"
+        )
+        conn.execute("INSERT INTO kb_sources VALUES ('legacy-1', NULL, '2026-08-01T00:00:00Z')")
+    store = KbStore(db)
+    # Legacy rows default to messages_done=0 (not yet backfilled).
+    assert store.sources_missing_messages() == ["legacy-1"]
+    # Reopening the migrated database is a no-op (idempotent migration).
+    KbStore(db)
+    assert store.sources_missing_messages() == ["legacy-1"]
+
+
+def test_sources_missing_messages_and_mark_done(trace_db):
+    store = KbStore.default()
+    store.record_source("s1", None, "2026-08-06T00:00:00Z")
+    store.record_source("s2", None, "2026-08-06T00:00:00Z", messages_done=True)
+    assert store.sources_missing_messages() == ["s1"]
+    store.mark_source_messages_done("s1")
+    assert store.sources_missing_messages() == []
+
+
+def test_sources_missing_messages_respects_limit(trace_db):
+    store = KbStore.default()
+    for i in range(5):
+        store.record_source(f"s{i}", None, "2026-08-06T00:00:00Z")
+    assert len(store.sources_missing_messages(limit=3)) == 3
 
 
 def test_meta_roundtrip(trace_db):

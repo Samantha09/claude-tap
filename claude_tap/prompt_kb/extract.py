@@ -57,7 +57,11 @@ def extract_session(
         snapshot = snapshot_from_records(records)
     except (ValueError, KeyError, TypeError) as exc:
         logger.info("no prompt snapshot in session %s: %s", session_id, exc)
-        store.record_source(session_id, None, processed_at)
+        # Message extraction does not depend on the snapshot. Run it before
+        # record_source so failures leave the session retriable on the next
+        # pass (same semantics as the snapshot path below).
+        extract_messages(store, session_id=session_id, client=client, records=records)
+        store.record_source(session_id, None, processed_at, messages_done=True)
         return None
     tools_json = json.dumps(
         [{"name": t.name, "description": t.description, "schema": t.schema} for t in snapshot.tools],
@@ -79,7 +83,7 @@ def extract_session(
     # Message extraction runs before record_source: on failure the session
     # stays unprocessed and is retried next pass (same semantics as snapshots).
     extract_messages(store, session_id=session_id, client=client, records=records)
-    store.record_source(session_id, snapshot_id, processed_at)
+    store.record_source(session_id, snapshot_id, processed_at, messages_done=True)
     return snapshot_id
 
 
@@ -93,7 +97,8 @@ def extract_unprocessed(store: KbStore, trace: TraceStore, *, limit: int = 50) -
         if store.is_source_processed(session_id):
             continue
         if not row["record_count"]:
-            store.record_source(session_id, None, _now())
+            # Empty sessions carry no messages either; mark both done.
+            store.record_source(session_id, None, _now(), messages_done=True)
             skipped += 1
             continue
         try:
@@ -113,4 +118,28 @@ def extract_unprocessed(store: KbStore, trace: TraceStore, *, limit: int = 50) -
         processed += 1
         if snap_id is not None:
             snapshots += 1
-    return {"processed": processed, "snapshots": snapshots, "skipped": skipped}
+    backfilled = _backfill_missing_messages(store, trace, limit=limit)
+    return {"processed": processed, "snapshots": snapshots, "skipped": skipped, "messages_backfilled": backfilled}
+
+
+def _backfill_missing_messages(store: KbStore, trace: TraceStore, *, limit: int) -> int:
+    """Extract user messages for sessions recorded by pre-messages builds."""
+    backfilled = 0
+    for session_id in store.sources_missing_messages(limit=limit):
+        row = trace.load_session_row(session_id)
+        if row is None:  # session was deleted from the trace store
+            store.mark_source_messages_done(session_id)
+            continue
+        try:
+            records = trace.load_records(session_id)
+            extract_messages(
+                store,
+                session_id=session_id,
+                client=str(row["client"] or "unknown"),
+                records=records,
+            )
+            store.mark_source_messages_done(session_id)
+            backfilled += 1
+        except Exception as exc:  # noqa: BLE001 - not marked, retried next round
+            logger.warning("kb message backfill failed for session %s: %s", session_id, exc)
+    return backfilled

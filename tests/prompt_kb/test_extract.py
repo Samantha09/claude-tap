@@ -117,8 +117,8 @@ def test_extract_unprocessed_walks_trace_store(trace_db):
     trace.append_record(session_id, _anthropic_record())
     store = KbStore.default()
     result = extract_unprocessed(store, trace)
-    assert result == {"processed": 1, "snapshots": 1, "skipped": 0}
-    assert extract_unprocessed(store, trace) == {"processed": 0, "snapshots": 0, "skipped": 0}
+    assert result == {"processed": 1, "snapshots": 1, "skipped": 0, "messages_backfilled": 0}
+    assert extract_unprocessed(store, trace) == {"processed": 0, "snapshots": 0, "skipped": 0, "messages_backfilled": 0}
 
 
 def test_extract_unprocessed_continues_after_failure(trace_db, monkeypatch):
@@ -138,7 +138,75 @@ def test_extract_unprocessed_continues_after_failure(trace_db, monkeypatch):
 
     monkeypatch.setattr(extract, "extract_session", flaky_extract_session)
     result = extract.extract_unprocessed(store, trace)
-    assert result == {"processed": 1, "snapshots": 1, "skipped": 1}
+    assert result == {"processed": 1, "snapshots": 1, "skipped": 1, "messages_backfilled": 0}
     # The failed session is not recorded, so it is retried on the next pass.
     assert store.is_source_processed(bad) is False
     assert store.is_source_processed(good) is True
+
+
+def test_extract_unprocessed_marks_empty_session_messages_done(trace_db):
+    trace = get_trace_store()
+    trace.create_session(client="claude-code", proxy_mode="reverse")  # no records
+    store = KbStore.default()
+    result = extract_unprocessed(store, trace)
+    assert result["skipped"] == 1
+    assert store.sources_missing_messages() == []
+
+
+def test_extract_unprocessed_backfills_messages_for_legacy_sources(trace_db):
+    trace = get_trace_store()
+    session_id = trace.create_session(client="claude-code", proxy_mode="reverse")
+    trace.append_record(session_id, _anthropic_record())
+    store = KbStore.default()
+    # Simulate the pre-messages build: session processed, messages never extracted.
+    store.record_source(session_id, None, "2026-08-09T00:00:00Z")
+    result = extract_unprocessed(store, trace)
+    assert result == {"processed": 0, "snapshots": 0, "skipped": 0, "messages_backfilled": 1}
+    assert [row["text"] for row in store.pending_messages(10)] == ["hi"]
+    assert store.sources_missing_messages() == []
+
+
+def test_extract_unprocessed_backfill_marks_deleted_session_done(trace_db):
+    store = KbStore.default()
+    store.record_source("gone-session", None, "2026-08-09T00:00:00Z")
+    result = extract_unprocessed(store, get_trace_store())
+    assert result["messages_backfilled"] == 0
+    assert store.sources_missing_messages() == []
+
+
+def test_extract_unprocessed_backfill_keeps_failed_session_retriable(trace_db, monkeypatch):
+    trace = get_trace_store()
+    session_id = trace.create_session(client="claude-code", proxy_mode="reverse")
+    trace.append_record(session_id, _anthropic_record())
+    store = KbStore.default()
+    store.record_source(session_id, None, "2026-08-09T00:00:00Z")
+
+    def boom(store, *, session_id, **kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(extract, "extract_messages", boom)
+    result = extract.extract_unprocessed(store, trace)
+    assert result["messages_backfilled"] == 0
+    # Not marked done: the next pass retries the backfill.
+    assert store.sources_missing_messages() == [session_id]
+
+
+def test_extract_session_extracts_messages_even_without_snapshot(tmp_path, monkeypatch):
+    store = KbStore(tmp_path / "kb.sqlite3")
+    records = [_anthropic_record()]
+
+    def no_snapshot(records):
+        raise ValueError("no prompt-bearing request found in trace")
+
+    monkeypatch.setattr(extract, "snapshot_from_records", no_snapshot)
+    snap_id = extract_session(
+        store,
+        session_id="s-ns",
+        client="claude",
+        records=records,
+        processed_at="2026-08-10T00:00:00Z",
+    )
+    assert snap_id is None
+    assert [row["text"] for row in store.pending_messages(10)] == ["hi"]
+    assert store.is_source_processed("s-ns") is True
+    assert store.sources_missing_messages() == []

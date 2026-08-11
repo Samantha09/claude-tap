@@ -41,7 +41,10 @@ def test_kb_status_prints_counts(seeded_kb, capsys):
 
 def test_kb_reindex(seeded_kb, capsys):
     assert kb_main(["reindex"]) == 0
-    assert "indexed=1" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "indexed=1" in out
+    assert "messages_indexed=0" in out
+    assert "messages_failed=0" in out
 
 
 def test_kb_search_prints_message_section(trace_db, monkeypatch, capsys):

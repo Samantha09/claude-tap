@@ -46,7 +46,10 @@ def kb_main(argv: list[str]) -> int:
     if args.command == "reindex":
         ensure_embedder_meta(store, embedder)
         result = rebuild_index(store, embedder)
-        print(f"indexed={result['indexed']} failed={result['failed']}")
+        print(
+            f"indexed={result['indexed']} failed={result['failed']}"
+            f" messages_indexed={result['messages_indexed']} messages_failed={result['messages_failed']}"
+        )
         return 0
     try:
         results = search(store, embedder, args.query, client=args.client, kind=args.kind, limit=args.limit)
