@@ -86,9 +86,12 @@ claude_tap/prompt_kb/mcp_server.py   # 新增（约 150 行）
 
 ```toml
 mcp = [
-    "mcp>=1.0",
+    "mcp>=1.0,<2",
 ]
 ```
+
+（2026-08-11 实现时修订：mcp 2.0 移除 `mcp.server.fastmcp.FastMCP` 并将
+`CallToolResult.isError` 改名 `is_error`，用户拍板钉 `<2`，2.x 移植留作后续。）
 
 用户安装 `pip install 'claude-tap[mcp,rag]'`（mcp extra 不含 rag 依赖，
 两个 extra 独立组合）。`mcp_server.py` 顶部：

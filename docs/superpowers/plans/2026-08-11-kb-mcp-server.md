@@ -29,7 +29,7 @@
 
 **Interfaces:**
 - Consumes: 无
-- Produces: `pyproject.toml` 中 `project.optional-dependencies.mcp = ["mcp>=1.0"]`，供后续任务与用户安装 `claude-tap[mcp,rag]` 使用。
+- Produces: `pyproject.toml` 中 `project.optional-dependencies.mcp = ["mcp>=1.0,<2"]`，供后续任务与用户安装 `claude-tap[mcp,rag]` 使用。（2026-08-11 修订：mcp 2.0 移除 FastMCP，用户拍板钉 `<2`。）
 
 - [ ] **Step 1: 写失败测试**
 
