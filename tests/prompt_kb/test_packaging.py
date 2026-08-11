@@ -24,3 +24,10 @@ def test_public_api_reexports():
     assert callable(search) and callable(index_pending)
     assert callable(rebuild_index) and callable(run_index_loop)
     assert KbStore is not None
+
+
+def test_mcp_extra_declared():
+    data = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))
+    extras = data["project"]["optional-dependencies"]
+    assert "mcp" in extras
+    assert any(dep.startswith("mcp") for dep in extras["mcp"])

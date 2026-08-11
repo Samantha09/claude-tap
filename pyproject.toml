@@ -62,6 +62,9 @@ rag = [
     "sentence-transformers>=2.7",
     "numpy>=1.26",
 ]
+mcp = [
+    "mcp>=1.0",
+]
 
 [tool.ruff]
 target-version = "py311"
