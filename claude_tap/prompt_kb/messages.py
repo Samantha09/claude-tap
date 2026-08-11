@@ -42,12 +42,14 @@ def extract_user_messages(records: list[dict[str, Any]]) -> list[UserMessage]:
         message_index = 0
         for text in _user_texts(provider, body):
             for piece in _split_message(text):
-                out.append(UserMessage(
-                    record_index=record_index,
-                    message_index=message_index,
-                    timestamp=timestamp,
-                    text=piece,
-                ))
+                out.append(
+                    UserMessage(
+                        record_index=record_index,
+                        message_index=message_index,
+                        timestamp=timestamp,
+                        text=piece,
+                    )
+                )
                 message_index += 1
     return out
 
@@ -89,9 +91,7 @@ def _anthropic_user_texts(body: dict[str, Any]) -> list[str]:
             texts = [
                 block["text"]
                 for block in content
-                if isinstance(block, dict)
-                and block.get("type") == "text"
-                and isinstance(block.get("text"), str)
+                if isinstance(block, dict) and block.get("type") == "text" and isinstance(block.get("text"), str)
             ]
             text = "\n\n".join(t.strip() for t in texts if t.strip())
         else:
@@ -143,9 +143,7 @@ def _gemini_user_texts(body: dict[str, Any]) -> list[str]:
         if not isinstance(parts, list):
             continue
         texts = [
-            part["text"]
-            for part in parts
-            if isinstance(part, dict) and isinstance(part.get("text"), str)
+            part["text"] for part in parts if isinstance(part, dict) and isinstance(part.get("text"), str)
         ]  # functionResponse parts carry no "text" key and are dropped implicitly
         text = "\n\n".join(t.strip() for t in texts if t.strip())
         if _keep_text(text):

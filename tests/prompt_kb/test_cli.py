@@ -49,9 +49,14 @@ def test_kb_search_prints_message_section(trace_db, monkeypatch, capsys):
     embedder = FakeEmbedder()
     ensure_embedder_meta(store, embedder)
     store.upsert_message(
-        session_id="sess-1", record_index=0, message_index=0,
-        client="claude", model="k3", timestamp="2026-08-10T01:00:00Z",
-        content_hash="h1", text="how to fix the race condition",
+        session_id="sess-1",
+        record_index=0,
+        message_index=0,
+        client="claude",
+        model="k3",
+        timestamp="2026-08-10T01:00:00Z",
+        content_hash="h1",
+        text="how to fix the race condition",
         seen_at="t",
     )
     index_pending(store, embedder)

@@ -37,7 +37,9 @@ def score_class(score):
 
 def _group(client, model, first_seen, scores):
     return {
-        "client": client, "model": model, "first_seen": first_seen,
+        "client": client,
+        "model": model,
+        "first_seen": first_seen,
         "hits": [{"kind": "tool", "title": "T", "text": "x", "score": s} for s in scores],
     }
 
@@ -107,6 +109,7 @@ def test_filter_message_groups():
 
 def test_template_contains_message_rendering():
     from claude_tap.dashboard import read_dashboard_template
+
     html = read_dashboard_template()
     assert "kbRenderMessageCard" in html
     assert "kb_messages_section" in html

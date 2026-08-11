@@ -652,10 +652,7 @@ class LiveViewerServer:
                         "session_id": group.session_id,
                         "client": group.client,
                         "model": group.model,
-                        "hits": [
-                            {"text": h.text, "timestamp": h.timestamp, "score": h.score}
-                            for h in group.hits
-                        ],
+                        "hits": [{"text": h.text, "timestamp": h.timestamp, "score": h.score} for h in group.hits],
                     }
                     for group in messages
                 ],

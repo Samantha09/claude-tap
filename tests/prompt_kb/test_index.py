@@ -95,9 +95,14 @@ def test_rebuild_resets_then_reindexes(trace_db):
 def test_index_pending_embeds_messages(tmp_path):
     store = KbStore(tmp_path / "kb.sqlite3")
     store.upsert_message(
-        session_id="s1", record_index=0, message_index=0,
-        client="claude", model="k3", timestamp="t",
-        content_hash="h1", text="how to fix race condition",
+        session_id="s1",
+        record_index=0,
+        message_index=0,
+        client="claude",
+        model="k3",
+        timestamp="t",
+        content_hash="h1",
+        text="how to fix race condition",
         seen_at="t",
     )
     embedder = FakeEmbedder()
@@ -117,9 +122,15 @@ def test_index_pending_message_batch_failure_marks_failed(tmp_path):
 
     store = KbStore(tmp_path / "kb.sqlite3")
     store.upsert_message(
-        session_id="s1", record_index=0, message_index=0,
-        client="claude", model="k3", timestamp="t",
-        content_hash="h1", text="x", seen_at="t",
+        session_id="s1",
+        record_index=0,
+        message_index=0,
+        client="claude",
+        model="k3",
+        timestamp="t",
+        content_hash="h1",
+        text="x",
+        seen_at="t",
     )
     result = index_pending(store, FailingEmbedder())
     assert result["messages_failed"] == 1
@@ -128,14 +139,26 @@ def test_index_pending_message_batch_failure_marks_failed(tmp_path):
 def test_rebuild_resets_both_tables(tmp_path):
     store = KbStore(tmp_path / "kb.sqlite3")
     snap_id, _ = store.upsert_snapshot(
-        content_hash="h", client="c", provider="p", model="m",
-        system_prompt="s", developer_prompt="", tools_json="[]", seen_at="t",
+        content_hash="h",
+        client="c",
+        provider="p",
+        model="m",
+        system_prompt="s",
+        developer_prompt="",
+        tools_json="[]",
+        seen_at="t",
     )
     store.replace_chunks(snap_id, [("tool", "t", "text")])
     store.upsert_message(
-        session_id="s1", record_index=0, message_index=0,
-        client="c", model="m", timestamp="t",
-        content_hash="h1", text="msg", seen_at="t",
+        session_id="s1",
+        record_index=0,
+        message_index=0,
+        client="c",
+        model="m",
+        timestamp="t",
+        content_hash="h1",
+        text="msg",
+        seen_at="t",
     )
     embedder = FakeEmbedder()
     index_pending(store, embedder)

@@ -20,9 +20,7 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def extract_messages(
-    store: KbStore, *, session_id: str, client: str, records: list[dict[str, Any]]
-) -> int:
+def extract_messages(store: KbStore, *, session_id: str, client: str, records: list[dict[str, Any]]) -> int:
     """Store user messages from a session's records into kb_messages.
 
     Returns the number of newly created (non-deduped) message chunks.

@@ -18,14 +18,20 @@ LONG_TEXT = "Read tool description. " * 30  # > 200 chars
 
 GROUPS = [
     {
-        "snapshot_id": 1, "client": "claude", "model": "k3-256k",
-        "first_seen": "2026-08-05T10:28:53", "last_seen": "2026-08-05T10:28:53",
+        "snapshot_id": 1,
+        "client": "claude",
+        "model": "k3-256k",
+        "first_seen": "2026-08-05T10:28:53",
+        "last_seen": "2026-08-05T10:28:53",
         "session_count": 1,
         "hits": [{"kind": "tool", "title": "Read", "text": LONG_TEXT, "score": 0.823}],
     },
     {
-        "snapshot_id": 2, "client": "claude", "model": "k3-256k",
-        "first_seen": "2026-08-06T16:34:47", "last_seen": "2026-08-06T16:34:47",
+        "snapshot_id": 2,
+        "client": "claude",
+        "model": "k3-256k",
+        "first_seen": "2026-08-06T16:34:47",
+        "last_seen": "2026-08-06T16:34:47",
         "session_count": 1,
         "hits": [
             {"kind": "tool", "title": "Read", "text": LONG_TEXT, "score": 0.95},
@@ -33,8 +39,11 @@ GROUPS = [
         ],
     },
     {
-        "snapshot_id": 3, "client": "codex", "model": "gpt-5",
-        "first_seen": "2026-08-04T09:00:00", "last_seen": "2026-08-04T09:00:00",
+        "snapshot_id": 3,
+        "client": "codex",
+        "model": "gpt-5",
+        "first_seen": "2026-08-04T09:00:00",
+        "last_seen": "2026-08-04T09:00:00",
         "session_count": 2,
         "hits": [{"kind": "tool", "title": "apply_patch", "text": "patch files", "score": 0.72}],
     },
@@ -126,10 +135,15 @@ def test_empty_state_shows_guidance(page):
 
 MESSAGES = [
     {
-        "session_id": "sess-abc", "client": "claude", "model": "k3-256k",
+        "session_id": "sess-abc",
+        "client": "claude",
+        "model": "k3-256k",
         "hits": [
-            {"text": "how do I fix the race condition in the worker pool",
-             "timestamp": "2026-08-09T10:00:00Z", "score": 0.87},
+            {
+                "text": "how do I fix the race condition in the worker pool",
+                "timestamp": "2026-08-09T10:00:00Z",
+                "score": 0.87,
+            },
         ],
     },
 ]

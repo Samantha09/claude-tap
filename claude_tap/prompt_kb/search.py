@@ -48,6 +48,7 @@ class SessionResult:
 
 def _cosine_scores(matrix, query_vec):
     import numpy as np
+
     q_norm = np.linalg.norm(query_vec) or 1.0
     m_norms = np.linalg.norm(matrix, axis=1)
     m_norms[m_norms == 0] = 1.0
@@ -167,9 +168,7 @@ def search_messages(
                 model=row["model"],
             ),
         )
-        group.hits.append(
-            MessageHit(text=row["text"], timestamp=row["timestamp"], score=float(score))
-        )
+        group.hits.append(MessageHit(text=row["text"], timestamp=row["timestamp"], score=float(score)))
     ordered = sorted(
         groups.values(),
         key=lambda g: max((h.score for h in g.hits), default=0.0),

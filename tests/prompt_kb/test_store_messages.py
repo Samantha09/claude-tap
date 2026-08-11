@@ -5,9 +5,14 @@ from claude_tap.prompt_kb.store import KbStore
 
 def _msg(**kw):
     base = dict(
-        session_id="s1", record_index=0, message_index=0,
-        client="claude", model="k3", timestamp="2026-08-10T01:00:00Z",
-        content_hash="h1", text="how do I fix the race condition",
+        session_id="s1",
+        record_index=0,
+        message_index=0,
+        client="claude",
+        model="k3",
+        timestamp="2026-08-10T01:00:00Z",
+        content_hash="h1",
+        text="how do I fix the race condition",
         seen_at="2026-08-10T01:00:00Z",
     )
     base.update(kw)
@@ -23,8 +28,7 @@ def test_table_created_idempotently(tmp_path):
 def test_upsert_dedup_same_hash_same_client(tmp_path):
     store = KbStore(tmp_path / "kb.sqlite3")
     mid1, created1 = store.upsert_message(**_msg())
-    mid2, created2 = store.upsert_message(**_msg(
-        session_id="s2", seen_at="2026-08-10T02:00:00Z"))
+    mid2, created2 = store.upsert_message(**_msg(session_id="s2", seen_at="2026-08-10T02:00:00Z"))
     assert created1 is True
     assert created2 is False
     assert mid1 == mid2

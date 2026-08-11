@@ -76,8 +76,11 @@ def test_extract_session_also_stores_user_messages(tmp_path):
         }
     ]
     snap_id = extract_session(
-        store, session_id="sess-1", client="claude",
-        records=records, processed_at="2026-08-10T02:00:00Z",
+        store,
+        session_id="sess-1",
+        client="claude",
+        records=records,
+        processed_at="2026-08-10T02:00:00Z",
     )
     assert snap_id is not None
     pending = store.pending_messages(10)
@@ -88,14 +91,15 @@ def test_extract_session_also_stores_user_messages(tmp_path):
 
 def test_extract_messages_model_from_body(tmp_path):
     import sqlite3
+
     store = KbStore(tmp_path / "kb.sqlite3")
     records = [
         {
             "timestamp": "2026-08-10T01:00:00Z",
             "request": {
-                "method": "POST", "path": "/v1/messages",
-                "body": {"model": "k3-256k",
-                         "messages": [{"role": "user", "content": "hello"}]},
+                "method": "POST",
+                "path": "/v1/messages",
+                "body": {"model": "k3-256k", "messages": [{"role": "user", "content": "hello"}]},
             },
             "response": {"status": 200},
         }

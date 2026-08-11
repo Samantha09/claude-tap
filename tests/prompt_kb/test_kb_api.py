@@ -95,9 +95,14 @@ def seeded_kb_messages(trace_db, monkeypatch):
     embedder = FakeEmbedder()
     ensure_embedder_meta(store, embedder)
     store.upsert_message(
-        session_id="sess-abc", record_index=0, message_index=0,
-        client="claude", model="k3", timestamp="2026-08-10T01:00:00Z",
-        content_hash="h1", text="how to fix the race condition",
+        session_id="sess-abc",
+        record_index=0,
+        message_index=0,
+        client="claude",
+        model="k3",
+        timestamp="2026-08-10T01:00:00Z",
+        content_hash="h1",
+        text="how to fix the race condition",
         seen_at="2026-08-10T01:00:00Z",
     )
     index_pending(store, embedder)
@@ -126,9 +131,7 @@ async def test_delete_session_cascades_kb_messages(trace_db, seeded_kb_messages,
     port = await server.start()
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.delete(
-                f"http://127.0.0.1:{port}/api/sessions/sess-abc"
-            ) as resp:
+            async with session.delete(f"http://127.0.0.1:{port}/api/sessions/sess-abc") as resp:
                 assert resp.status in (200, 404)  # 404 if trace session absent; cascade must still run
         assert store.stats()["messages"] == 0
     finally:

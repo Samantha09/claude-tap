@@ -60,9 +60,7 @@ def kb_main(argv: list[str]) -> int:
         for hit in group.hits:
             print(f"    {hit.kind} {hit.title} score={hit.score:.3f}")
             print(f"    {hit.text[:200]}")
-    message_results = search_messages(
-        store, embedder, args.query, client=args.client, limit=args.limit
-    )
+    message_results = search_messages(store, embedder, args.query, client=args.client, limit=args.limit)
     if message_results:
         print("messages:")
         for rank, group in enumerate(message_results, 1):

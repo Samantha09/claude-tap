@@ -76,7 +76,9 @@ class LocalEmbedder:
     prefixed vector spaces from pre-prefix indexes (kb_meta mismatch → reindex).
     """
 
-    def __init__(self, model_name: str = DEFAULT_LOCAL_MODEL, *, query_prefix: str = "query: ", passage_prefix: str = "passage: "):
+    def __init__(
+        self, model_name: str = DEFAULT_LOCAL_MODEL, *, query_prefix: str = "query: ", passage_prefix: str = "passage: "
+    ):
         try:
             from sentence_transformers import SentenceTransformer
         except ImportError as exc:
@@ -85,7 +87,9 @@ class LocalEmbedder:
             ) from exc
         try:
             self._model = SentenceTransformer(model_name)
-            get_dim = getattr(self._model, "get_embedding_dimension", None) or self._model.get_sentence_embedding_dimension
+            get_dim = (
+                getattr(self._model, "get_embedding_dimension", None) or self._model.get_sentence_embedding_dimension
+            )
             self.dimension = int(get_dim())
         except Exception as exc:
             # Model download/load failures (network, TLS, disk, corrupt cache)

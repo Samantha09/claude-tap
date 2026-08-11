@@ -18,17 +18,22 @@ def _record(body, path="/v1/messages", timestamp="2026-08-10T01:00:00Z"):
 
 def test_anthropic_user_messages():
     records = [
-        _record({
-            "model": "k3",
-            "messages": [
-                {"role": "user", "content": "how do I fix the race condition"},
-                {"role": "assistant", "content": "use a lock"},
-                {"role": "user", "content": [
-                    {"type": "text", "text": "it still hangs"},
-                    {"type": "image", "source": {"data": "..."}},
-                ]},
-            ],
-        }),
+        _record(
+            {
+                "model": "k3",
+                "messages": [
+                    {"role": "user", "content": "how do I fix the race condition"},
+                    {"role": "assistant", "content": "use a lock"},
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": "it still hangs"},
+                            {"type": "image", "source": {"data": "..."}},
+                        ],
+                    },
+                ],
+            }
+        ),
     ]
     msgs = extract_user_messages(records)
     assert [m.text for m in msgs] == [
@@ -42,19 +47,25 @@ def test_anthropic_user_messages():
 
 def test_anthropic_tool_result_blocks_skipped():
     records = [
-        _record({
-            "messages": [
-                {"role": "user", "content": [
-                    {"type": "tool_result", "tool_use_id": "t1",
-                     "content": "file contents here"},
-                ]},
-                {"role": "user", "content": [
-                    {"type": "tool_result", "tool_use_id": "t2",
-                     "content": "output"},
-                    {"type": "text", "text": "now fix it"},
-                ]},
-            ],
-        }),
+        _record(
+            {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "tool_result", "tool_use_id": "t1", "content": "file contents here"},
+                        ],
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "tool_result", "tool_use_id": "t2", "content": "output"},
+                            {"type": "text", "text": "now fix it"},
+                        ],
+                    },
+                ],
+            }
+        ),
     ]
     msgs = extract_user_messages(records)
     # First message is pure tool_result -> dropped; second keeps only text part
@@ -63,17 +74,23 @@ def test_anthropic_tool_result_blocks_skipped():
 
 def test_openai_chat_completions():
     records = [
-        _record({
-            "model": "gpt-5",
-            "messages": [
-                {"role": "system", "content": "dev"},
-                {"role": "user", "content": "refactor the parser"},
-                {"role": "tool", "tool_call_id": "c1", "content": "result"},
-                {"role": "user", "content": [
-                    {"type": "text", "text": "and add tests"},
-                ]},
-            ],
-        }, path="/v1/chat/completions"),
+        _record(
+            {
+                "model": "gpt-5",
+                "messages": [
+                    {"role": "system", "content": "dev"},
+                    {"role": "user", "content": "refactor the parser"},
+                    {"role": "tool", "tool_call_id": "c1", "content": "result"},
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": "and add tests"},
+                        ],
+                    },
+                ],
+            },
+            path="/v1/chat/completions",
+        ),
     ]
     msgs = extract_user_messages(records)
     assert [m.text for m in msgs] == ["refactor the parser", "and add tests"]
@@ -81,15 +98,21 @@ def test_openai_chat_completions():
 
 def test_openai_responses_input():
     records = [
-        _record({
-            "model": "gpt-5",
-            "instructions": "dev",
-            "input": [
-                {"type": "message", "role": "user",
-                 "content": [{"type": "input_text", "text": "explain this repo"}]},
-                {"type": "function_call_output", "call_id": "c1", "output": "x"},
-            ],
-        }, path="/v1/responses"),
+        _record(
+            {
+                "model": "gpt-5",
+                "instructions": "dev",
+                "input": [
+                    {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": "explain this repo"}],
+                    },
+                    {"type": "function_call_output", "call_id": "c1", "output": "x"},
+                ],
+            },
+            path="/v1/responses",
+        ),
     ]
     msgs = extract_user_messages(records)
     assert [m.text for m in msgs] == ["explain this repo"]
@@ -97,15 +120,21 @@ def test_openai_responses_input():
 
 def test_gemini_contents():
     records = [
-        _record({
-            "contents": [
-                {"role": "user", "parts": [{"text": "write a haiku"}]},
-                {"role": "user", "parts": [
-                    {"functionResponse": {"name": "f", "response": {}}},
-                ]},
-                {"role": "model", "parts": [{"text": "ok"}]},
-            ],
-        }, path="/v1beta/models/gemini-3:generateContent"),
+        _record(
+            {
+                "contents": [
+                    {"role": "user", "parts": [{"text": "write a haiku"}]},
+                    {
+                        "role": "user",
+                        "parts": [
+                            {"functionResponse": {"name": "f", "response": {}}},
+                        ],
+                    },
+                    {"role": "model", "parts": [{"text": "ok"}]},
+                ],
+            },
+            path="/v1beta/models/gemini-3:generateContent",
+        ),
     ]
     msgs = extract_user_messages(records)
     assert [m.text for m in msgs] == ["write a haiku"]
@@ -113,14 +142,16 @@ def test_gemini_contents():
 
 def test_harness_injected_messages_filtered():
     records = [
-        _record({
-            "messages": [
-                {"role": "user", "content": "<system-reminder>secret</system-reminder>"},
-                {"role": "user", "content": "<command-message>/clear</command-message>"},
-                {"role": "user", "content": "   "},
-                {"role": "user", "content": "real question"},
-            ],
-        }),
+        _record(
+            {
+                "messages": [
+                    {"role": "user", "content": "<system-reminder>secret</system-reminder>"},
+                    {"role": "user", "content": "<command-message>/clear</command-message>"},
+                    {"role": "user", "content": "   "},
+                    {"role": "user", "content": "real question"},
+                ],
+            }
+        ),
     ]
     msgs = extract_user_messages(records)
     assert [m.text for m in msgs] == ["real question"]

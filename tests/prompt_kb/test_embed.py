@@ -90,7 +90,6 @@ def test_fake_embedder_semantic():
 
 
 def _fake_st_module(recorder: list) -> "object":
-    import sys
     import types
 
     fake = types.ModuleType("sentence_transformers")
@@ -130,7 +129,7 @@ def test_local_embedder_name_marks_prefix_space(monkeypatch):
 
     monkeypatch.setitem(sys.modules, "sentence_transformers", _fake_st_module([]))
     emb = embed_mod.LocalEmbedder("some-model")
-    assert emb.name != f"local:some-model"
+    assert emb.name != "local:some-model"
     assert emb.name.startswith("local:some-model")
 
 

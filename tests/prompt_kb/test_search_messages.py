@@ -13,16 +13,23 @@ def seeded(tmp_path):
     store = KbStore(tmp_path / "kb.sqlite3")
     embedder = FakeEmbedder()
     ensure_embedder_meta(store, embedder)
-    for i, (sid, text) in enumerate([
-        ("s1", "how do I fix the race condition in the worker pool"),
-        ("s1", "the lock ordering was wrong"),
-        ("s2", "recipe for tomato soup"),
-    ]):
+    for i, (sid, text) in enumerate(
+        [
+            ("s1", "how do I fix the race condition in the worker pool"),
+            ("s1", "the lock ordering was wrong"),
+            ("s2", "recipe for tomato soup"),
+        ]
+    ):
         store.upsert_message(
-            session_id=sid, record_index=i, message_index=0,
+            session_id=sid,
+            record_index=i,
+            message_index=0,
             client="claude" if sid == "s1" else "codex",
-            model="k3", timestamp=f"2026-08-0{i+1}T00:00:00Z",
-            content_hash=f"h{i}", text=text, seen_at="t",
+            model="k3",
+            timestamp=f"2026-08-0{i + 1}T00:00:00Z",
+            content_hash=f"h{i}",
+            text=text,
+            seen_at="t",
         )
     index_pending(store, embedder)
     return store, embedder
@@ -67,12 +74,12 @@ def test_reindex_required_on_embedder_mismatch(tmp_path):
 
 def test_perf_20k_chunks_under_200ms(tmp_path):
     import time
+
     store = KbStore(tmp_path / "kb.sqlite3")
     embedder = FakeEmbedder()
     ensure_embedder_meta(store, embedder)
     rows = [
-        (f"s{i % 100}", i, 0, "claude", "k3", "t", f"h{i}",
-         f"message {i} about topic {i % 50}", "t")
+        (f"s{i % 100}", i, 0, "claude", "k3", "t", f"h{i}", f"message {i} about topic {i % 50}", "t")
         for i in range(20_000)
     ]
     with store._connect() as conn:

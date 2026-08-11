@@ -199,9 +199,17 @@ class KbStore:
             return cur.rowcount
 
     def upsert_message(
-        self, *, session_id: str, record_index: int, message_index: int,
-        client: str, model: str, timestamp: str, content_hash: str,
-        text: str, seen_at: str,
+        self,
+        *,
+        session_id: str,
+        record_index: int,
+        message_index: int,
+        client: str,
+        model: str,
+        timestamp: str,
+        content_hash: str,
+        text: str,
+        seen_at: str,
     ) -> tuple[int, bool]:
         """Insert a user-message chunk; dedup on (content_hash, client).
 
@@ -224,8 +232,7 @@ class KbStore:
                    (session_id, record_index, message_index, client, model,
                     timestamp, content_hash, text, last_seen)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (session_id, record_index, message_index, client, model,
-                 timestamp, content_hash, text, seen_at),
+                (session_id, record_index, message_index, client, model, timestamp, content_hash, text, seen_at),
             )
             return int(cur.lastrowid), True
 
@@ -267,9 +274,7 @@ class KbStore:
 
     def reset_message_embeddings(self) -> int:
         with self._connect() as conn:
-            cur = conn.execute(
-                "UPDATE kb_messages SET embedding=NULL, index_state='pending', attempts=0"
-            )
+            cur = conn.execute("UPDATE kb_messages SET embedding=NULL, index_state='pending', attempts=0")
             return cur.rowcount
 
     def delete_messages_for_session(self, session_id: str) -> int:
@@ -312,7 +317,5 @@ class KbStore:
                 "pending": int(by_state.get("pending", 0)),
                 "failed": int(by_state.get("failed", 0)),
                 "indexed": int(by_state.get("indexed", 0)),
-                "messages": int(
-                    conn.execute("SELECT COUNT(*) c FROM kb_messages").fetchone()["c"]
-                ),
+                "messages": int(conn.execute("SELECT COUNT(*) c FROM kb_messages").fetchone()["c"]),
             }
