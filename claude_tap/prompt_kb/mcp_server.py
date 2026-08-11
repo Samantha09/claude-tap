@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import sqlite3
 from typing import TYPE_CHECKING, Any, Literal
 
-from claude_tap.prompt_kb.embed import create_embedder, load_config
+from claude_tap.prompt_kb.embed import EmbedderUnavailable, create_embedder, load_config
 from claude_tap.prompt_kb.index import index_pending
-from claude_tap.prompt_kb.search import search, search_messages
+from claude_tap.prompt_kb.search import ReindexRequired, search, search_messages
 from claude_tap.prompt_kb.store import KbStore
 
 if TYPE_CHECKING:
@@ -45,10 +46,19 @@ def kb_search(
     Returns:
         {"chunks": [...], "messages": [...]} grouped by snapshot / session.
     """
-    store, embedder = _get_ctx()
-    index_pending(store, embedder)
-    chunk_groups = search(store, embedder, query, client=client, kind=kind, limit=limit, min_score=min_score)
-    message_groups = search_messages(store, embedder, query, client=client, limit=limit, min_score=min_score)
+    try:
+        store, embedder = _get_ctx()
+    except EmbedderUnavailable as exc:
+        return {"error": f"embedder unavailable: {exc}", "chunks": [], "messages": []}
+    try:
+        index_pending(store, embedder)
+    except sqlite3.OperationalError:
+        pass  # dashboard's lazy indexer holds the write lock; search the stale index
+    try:
+        chunk_groups = search(store, embedder, query, client=client, kind=kind, limit=limit, min_score=min_score)
+        message_groups = search_messages(store, embedder, query, client=client, limit=limit, min_score=min_score)
+    except ReindexRequired as exc:
+        return {"error": str(exc), "chunks": [], "messages": []}
     return {
         "chunks": [
             {

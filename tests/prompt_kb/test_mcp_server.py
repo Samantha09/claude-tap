@@ -1,10 +1,13 @@
 """Unit tests for the MCP server tools (no stdio, no real model)."""
 
+import sqlite3
+
 import pytest
 
 pytest.importorskip("numpy")  # search depends on the [rag] extra
 
 from claude_tap.prompt_kb import mcp_server  # noqa: E402
+from claude_tap.prompt_kb.embed import EmbedderUnavailable  # noqa: E402
 from claude_tap.prompt_kb.index import ensure_embedder_meta, index_pending  # noqa: E402
 from claude_tap.prompt_kb.store import KbStore  # noqa: E402
 from tests.prompt_kb.fake_embedder import FakeEmbedder  # noqa: E402
@@ -98,3 +101,38 @@ def test_kb_status(ctx):
     for key in ("snapshots", "chunks", "pending", "failed", "indexed", "messages"):
         assert key in status
     assert status["snapshots"] == 1 and status["messages"] == 1
+
+
+def test_kb_search_embedder_unavailable(monkeypatch):
+    def _raise():
+        raise EmbedderUnavailable("sentence-transformers is not installed")
+
+    monkeypatch.setattr(mcp_server, "_get_ctx", _raise)
+    result = mcp_server.kb_search("anything")
+    assert "sentence-transformers" in result["error"]
+    assert result["chunks"] == [] and result["messages"] == []
+
+
+def test_kb_search_reindex_required(ctx, monkeypatch):
+    store, _ = ctx
+    _seed(store)
+    other = FakeEmbedder()
+    other.name = "other"  # instance attribute shadows the class attribute
+    monkeypatch.setattr(mcp_server, "_get_ctx", lambda: (store, other))
+    result = mcp_server.kb_search("shell sandbox")
+    assert "reindex" in result["error"]
+    assert result["chunks"] == [] and result["messages"] == []
+
+
+def test_kb_search_survives_index_lock(ctx, monkeypatch):
+    """A locked DB (dashboard lazy indexer) must not fail the search."""
+    store, _ = ctx
+    _seed(store)
+
+    def _locked(store, embedder, **kwargs):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(mcp_server, "index_pending", _locked)
+    result = mcp_server.kb_search("shell sandbox")
+    assert "error" not in result
+    assert result["chunks"][0]["hits"][0]["title"] == "shell"
