@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+import sys
 from typing import TYPE_CHECKING, Any, Literal
 
 from claude_tap.prompt_kb.embed import EmbedderUnavailable, create_embedder, load_config
@@ -12,6 +13,13 @@ from claude_tap.prompt_kb.store import KbStore
 
 if TYPE_CHECKING:
     from claude_tap.prompt_kb.embed import Embedder
+
+try:
+    from mcp.server.fastmcp import FastMCP
+except ImportError:
+    FastMCP = None  # type: ignore[assignment]
+
+INSTALL_HINT = "MCP support is not installed; run: pip install 'claude-tap[mcp,rag]'"
 
 _ctx: tuple[KbStore, Embedder] | None = None
 
@@ -45,6 +53,7 @@ def kb_search(
 
     Returns:
         {"chunks": [...], "messages": [...]} grouped by snapshot / session.
+        On embedder/reindex failure: {"error": str, "chunks": [], "messages": []}.
     """
     try:
         store, embedder = _get_ctx()
@@ -92,3 +101,15 @@ def kb_status() -> dict[str, Any]:
     """
     store = KbStore.default()
     return {**store.stats(), "embedder": store.get_meta("embedder_name") or "none"}
+
+
+def main() -> int:
+    """Run the MCP stdio server; degrade to an install hint without [mcp]."""
+    if FastMCP is None:
+        print(INSTALL_HINT, file=sys.stderr)
+        return 2
+    server = FastMCP("claude-tap-kb")
+    server.tool()(kb_search)
+    server.tool()(kb_status)
+    server.run()  # stdio transport
+    return 0

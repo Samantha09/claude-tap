@@ -136,3 +136,48 @@ def test_kb_search_survives_index_lock(ctx, monkeypatch):
     result = mcp_server.kb_search("shell sandbox")
     assert "error" not in result
     assert result["chunks"][0]["hits"][0]["title"] == "shell"
+
+
+def test_main_without_mcp_extra(capsys, monkeypatch):
+    monkeypatch.setattr(mcp_server, "FastMCP", None)
+    assert mcp_server.main() == 2
+    assert "claude-tap[mcp,rag]" in capsys.readouterr().err
+
+
+def test_main_registers_tools_and_runs_stdio(monkeypatch):
+    class _FakeFastMCP:
+        instances = []
+
+        def __init__(self, name):
+            self.name = name
+            self.tools = []
+            self.ran = False
+            _FakeFastMCP.instances.append(self)
+
+        def tool(self):
+            def decorate(fn):
+                self.tools.append(fn.__name__)
+                return fn
+
+            return decorate
+
+        def run(self):
+            self.ran = True
+
+    monkeypatch.setattr(mcp_server, "FastMCP", _FakeFastMCP)
+    assert mcp_server.main() == 0
+    server = _FakeFastMCP.instances[0]
+    assert server.tools == ["kb_search", "kb_status"]
+    assert server.ran
+
+
+def test_cli_dispatch_mcp(monkeypatch):
+    import sys
+
+    import claude_tap.cli as cli
+
+    monkeypatch.setattr(sys, "argv", ["claude-tap", "mcp"])
+    monkeypatch.setattr(mcp_server, "main", lambda: 0)
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main_entry()
+    assert exc_info.value.code == 0

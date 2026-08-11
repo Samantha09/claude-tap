@@ -1087,6 +1087,11 @@ def main_entry() -> None:
 
         sys.exit(kb_main(sys.argv[2:]))
 
+    if len(sys.argv) > 1 and sys.argv[1] == "mcp":
+        from claude_tap.prompt_kb.mcp_server import main as mcp_main
+
+        sys.exit(mcp_main())
+
     if len(sys.argv) > 1 and sys.argv[1] == "dashboard":
         args = parse_dashboard_args(sys.argv[2:])
         try:
