@@ -63,7 +63,7 @@ rag = [
     "numpy>=1.26",
 ]
 mcp = [
-    "mcp>=1.0",
+    "mcp>=1.0,<2",
 ]
 
 [tool.ruff]
