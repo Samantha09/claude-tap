@@ -101,6 +101,9 @@ class KbStore:
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self._db_path)
+        # Wait up to 2s on a writer's lock (e.g. the dashboard's lazy indexer)
+        # instead of failing reads instantly with "database is locked".
+        conn.execute("PRAGMA busy_timeout = 2000")
         conn.row_factory = sqlite3.Row
         return conn
 

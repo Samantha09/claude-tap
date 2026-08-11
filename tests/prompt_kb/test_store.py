@@ -94,3 +94,13 @@ def test_meta_roundtrip(trace_db):
     assert store.get_meta("embedder_name") is None
     store.set_meta("embedder_name", "fake")
     assert store.get_meta("embedder_name") == "fake"
+
+
+def test_connect_sets_busy_timeout(trace_db):
+    """Connections must wait for a concurrent writer instead of failing reads instantly."""
+    store = KbStore.default()
+    conn = store._connect()
+    try:
+        assert conn.execute("PRAGMA busy_timeout").fetchone()[0] == 2000
+    finally:
+        conn.close()

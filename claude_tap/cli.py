@@ -1088,6 +1088,10 @@ def main_entry() -> None:
         sys.exit(kb_main(sys.argv[2:]))
 
     if len(sys.argv) > 1 and sys.argv[1] == "mcp":
+        if len(sys.argv) > 2 and sys.argv[2] in ("-h", "--help"):
+            print("Usage: claude-tap mcp")
+            print("Run the MCP stdio server for the prompt knowledge base (requires the claude-tap[mcp,rag] extras).")
+            sys.exit(0)
         from claude_tap.prompt_kb.mcp_server import main as mcp_main
 
         sys.exit(mcp_main())

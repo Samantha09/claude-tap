@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 import sys
+import threading
 from typing import TYPE_CHECKING, Any, Literal
 
 from claude_tap.prompt_kb.embed import EmbedderUnavailable, create_embedder, load_config
@@ -22,16 +23,21 @@ except ImportError:
 INSTALL_HINT = "MCP support is not installed; run: pip install 'claude-tap[mcp,rag]'"
 
 _ctx: tuple[KbStore, Embedder] | None = None
+_ctx_lock = threading.Lock()
 
 
 def _get_ctx() -> tuple[KbStore, Embedder]:
     """Lazily open the KB store and build the embedder.
 
     The embedding model loads on first tool call, not at server startup.
+    FastMCP runs sync tools in a threadpool, so guard the one-time build
+    with a lock (double-checked) to avoid loading the model twice.
     """
     global _ctx
     if _ctx is None:
-        _ctx = (KbStore.default(), create_embedder(load_config()))
+        with _ctx_lock:
+            if _ctx is None:
+                _ctx = (KbStore.default(), create_embedder(load_config()))
     return _ctx
 
 
@@ -68,6 +74,10 @@ def kb_search(
         message_groups = search_messages(store, embedder, query, client=client, limit=limit, min_score=min_score)
     except ReindexRequired as exc:
         return {"error": str(exc), "chunks": [], "messages": []}
+    except EmbedderUnavailable as exc:
+        return {"error": f"embedder unavailable: {exc}", "chunks": [], "messages": []}
+    except Exception as exc:  # noqa: BLE001 - never throw a stack at the MCP client
+        return {"error": f"kb_search failed: {exc}", "chunks": [], "messages": []}
     return {
         "chunks": [
             {
@@ -99,8 +109,11 @@ def kb_status() -> dict[str, Any]:
         store.stats() keys (snapshots/chunks/pending/failed/indexed/messages)
         plus "embedder" (indexed embedder name, or "none").
     """
-    store = KbStore.default()
-    return {**store.stats(), "embedder": store.get_meta("embedder_name") or "none"}
+    try:
+        store = KbStore.default()
+        return {**store.stats(), "embedder": store.get_meta("embedder_name") or "none"}
+    except sqlite3.OperationalError as exc:
+        return {"error": f"kb unavailable: {exc}"}
 
 
 def main() -> int:

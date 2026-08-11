@@ -1,6 +1,7 @@
 """Unit tests for the MCP server tools (no stdio, no real model)."""
 
 import sqlite3
+import urllib.error
 
 import pytest
 
@@ -113,6 +114,42 @@ def test_kb_search_embedder_unavailable(monkeypatch):
     assert result["chunks"] == [] and result["messages"] == []
 
 
+def test_kb_search_query_time_embedder_unavailable(ctx, monkeypatch):
+    """An embedder failure at query time must honor the error-dict contract."""
+
+    def _raise(*args, **kwargs):
+        raise EmbedderUnavailable("numpy is not installed")
+
+    monkeypatch.setattr(mcp_server, "search", _raise)
+    result = mcp_server.kb_search("anything")
+    assert "embedder unavailable" in result["error"]
+    assert "numpy" in result["error"]
+    assert result["chunks"] == [] and result["messages"] == []
+
+
+def test_kb_search_query_time_network_error(ctx, monkeypatch):
+    """An ApiEmbedder going offline at query time must not raise to the client."""
+
+    def _raise(*args, **kwargs):
+        raise urllib.error.URLError("offline")
+
+    monkeypatch.setattr(mcp_server, "search", _raise)
+    result = mcp_server.kb_search("anything")
+    assert "offline" in result["error"]
+    assert result["chunks"] == [] and result["messages"] == []
+
+
+def test_kb_status_operational_error(ctx, monkeypatch):
+    """A locked DB on the read path must return an error dict, not raise."""
+
+    def _locked(self):
+        raise sqlite3.OperationalError("locked")
+
+    monkeypatch.setattr(KbStore, "stats", _locked)
+    result = mcp_server.kb_status()
+    assert "locked" in result["error"]
+
+
 def test_kb_search_reindex_required(ctx, monkeypatch):
     store, _ = ctx
     _seed(store)
@@ -181,3 +218,22 @@ def test_cli_dispatch_mcp(monkeypatch):
     with pytest.raises(SystemExit) as exc_info:
         cli.main_entry()
     assert exc_info.value.code == 0
+
+
+def test_cli_dispatch_mcp_help(capsys, monkeypatch):
+    """`claude-tap mcp --help` must print usage instead of launching the server."""
+    import sys
+
+    import claude_tap.cli as cli
+
+    def _forbidden():
+        raise AssertionError("server must not launch for --help")
+
+    monkeypatch.setattr(sys, "argv", ["claude-tap", "mcp", "--help"])
+    monkeypatch.setattr(mcp_server, "main", _forbidden)
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main_entry()
+    assert exc_info.value.code == 0
+    out = capsys.readouterr().out
+    assert "Usage: claude-tap mcp" in out
+    assert "claude-tap[mcp,rag]" in out
