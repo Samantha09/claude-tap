@@ -9,13 +9,45 @@ normalization helpers in claude_tap.prompt_snapshot.
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass
 from typing import Any
 
 from claude_tap.prompt_kb.chunk import MAX_SECTION_CHARS, _split_long
 from claude_tap.prompt_snapshot import _content_text, _request_body, infer_provider
 
-_HARNES_PREFIXES = ("<system-reminder", "<command-message", "<local-command")
+_HARNESS_PREFIXES = ("<system-reminder", "<command-message", "<local-command")
+
+# Drop rules ported from claude_tap.viewer._clean_session_user_text: harness
+# boilerplate injected by Codex/Gemini CLIs as role=user messages. Only the
+# viewer's drop rules are ported, not its extraction rules.
+_DROP_FIRST_TAGS = {
+    "artifacts",
+    "codex_internal_context",
+    "environment_context",
+    "local-command-caveat",
+    "session_context",
+    "skills",
+    "slash_commands",
+    "subagents",
+    "system-reminder",
+    "user_information",
+}
+
+_DROP_STARTSWITH = (
+    "# AGENTS.md instructions",
+    "<INSTRUCTIONS>",
+    "# Files mentioned by the user:",
+)
+
+_DROP_PATTERNS = (
+    re.compile(r"^</?image(_input)?(\s+[^>]*)?>$", flags=re.IGNORECASE),
+    re.compile(r"^\[SUGGESTION MODE:", flags=re.IGNORECASE),
+    re.compile(r"^(web page content|page content|网页内容)\s*[:：]", flags=re.IGNORECASE),
+    re.compile(r"^\[Image:\s*source:", flags=re.IGNORECASE),
+)
+
+_FIRST_TAG_RE = re.compile(r"^<([A-Za-z_-]+)")
 
 
 @dataclass(frozen=True)
@@ -74,7 +106,14 @@ def _keep_text(text: str) -> bool:
     stripped = text.strip()
     if not stripped:
         return False
-    return not any(stripped.startswith(prefix) for prefix in _HARNES_PREFIXES)
+    if any(stripped.startswith(prefix) for prefix in _HARNESS_PREFIXES):
+        return False
+    first_tag = _FIRST_TAG_RE.match(stripped)
+    if first_tag and first_tag.group(1).lower() in _DROP_FIRST_TAGS:
+        return False
+    if stripped.startswith(_DROP_STARTSWITH):
+        return False
+    return not any(pattern.match(stripped) for pattern in _DROP_PATTERNS)
 
 
 def _anthropic_user_texts(body: dict[str, Any]) -> list[str]:

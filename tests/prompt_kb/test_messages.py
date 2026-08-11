@@ -2,7 +2,10 @@
 
 import hashlib
 
+import pytest
+
 from claude_tap.prompt_kb.messages import (
+    _keep_text,
     extract_user_messages,
     message_content_hash,
 )
@@ -147,6 +150,7 @@ def test_harness_injected_messages_filtered():
                 "messages": [
                     {"role": "user", "content": "<system-reminder>secret</system-reminder>"},
                     {"role": "user", "content": "<command-message>/clear</command-message>"},
+                    {"role": "user", "content": "<local-command-stdout>out</local-command-stdout>"},
                     {"role": "user", "content": "   "},
                     {"role": "user", "content": "real question"},
                 ],
@@ -155,6 +159,74 @@ def test_harness_injected_messages_filtered():
     ]
     msgs = extract_user_messages(records)
     assert [m.text for m in msgs] == ["real question"]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # First XML tag in viewer drop set
+        "<environment_context>cwd=/x, date=2026-08-10</environment_context>",
+        "<user_information>name: san</user_information>",
+        "<skills><skill>a</skill></skills>",
+        "<artifacts>artifact list</artifacts>",
+        "<codex_internal_context>ctx</codex_internal_context>",
+        "<local-command-caveat>caveat</local-command-caveat>",
+        "<session_context>ctx</session_context>",
+        "<slash_commands>/a /b</slash_commands>",
+        "<subagents>agents</subagents>",
+        "<system-reminder>secret</system-reminder>",
+        # startswith drops
+        "<INSTRUCTIONS>do not break things</INSTRUCTIONS>",
+        "# AGENTS.md instructions\nFollow the rules in AGENTS.md",
+        "# Files mentioned by the user:\n- foo.py",
+        # regex drops
+        "<image_input>",
+        "</image>",
+        "<image width=100>",
+        "[SUGGESTION MODE: rewrite the last reply]",
+        "web page content: hello world",
+        "Page Content: hello world",
+        "网页内容:你好",
+        "[Image: source: /path/x.png]",
+    ],
+)
+def test_viewer_drop_rules_applied(text):
+    assert _keep_text(text) is False
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "how do I fix the race condition",
+        "这个接口为什么会超时?",
+        "[Image #1] 这张图里的报错是什么原因?",
+        "please review <session_context> block inside my text",
+        "use the <skills> directory layout",
+        "my web page content pipeline is broken",
+    ],
+)
+def test_genuine_user_text_kept(text):
+    assert _keep_text(text) is True
+
+
+def test_viewer_drop_rules_end_to_end():
+    records = [
+        _record(
+            {
+                "messages": [
+                    {"role": "user", "content": "<environment_context>cwd=/x</environment_context>"},
+                    {"role": "user", "content": "# AGENTS.md instructions\nrules here"},
+                    {"role": "user", "content": "[SUGGESTION MODE: ...]"},
+                    {"role": "user", "content": "网页内容:抓取结果"},
+                    {"role": "user", "content": "[Image: source: /tmp/a.png]"},
+                    {"role": "user", "content": "<image_input>"},
+                    {"role": "user", "content": "actual user question"},
+                ],
+            }
+        ),
+    ]
+    msgs = extract_user_messages(records)
+    assert [m.text for m in msgs] == ["actual user question"]
 
 
 def test_long_message_split():
