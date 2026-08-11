@@ -635,6 +635,8 @@ The viewer is a single self-contained HTML file (zero external dependencies):
 
 After `pip install 'claude-tap[rag]'`, the dashboard's "Prompt Knowledge Base" page can semantically search the system prompts and tool definitions captured locally from each CLI, and show a prompt version timeline per client/model. Indexing runs entirely locally (default `intfloat/multilingual-e5-small`; set `CLAUDE_TAP_KB_EMBEDDER=api` and related environment variables to switch to an OpenAI-compatible embedding API). CLI equivalents: `claude-tap kb search "..."` / `claude-tap kb reindex` / `claude-tap kb status`.
 
+The knowledge base can also be exposed to agents over MCP (stdio): after `pip install 'claude-tap[mcp,rag]'`, run `claude mcp add claude-tap-kb -- claude-tap mcp`. This registers a `claude-tap-kb` server with two read-only tools: `kb_search` (semantic search over prompts, tool definitions and user messages) and `kb_status` (index stats). Each `kb_search` call first indexes newly captured traces, so results stay fresh even when the dashboard is not running.
+
 ## Architecture
 
 ![Architecture](docs/architecture.png)
