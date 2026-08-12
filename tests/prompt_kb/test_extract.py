@@ -105,10 +105,43 @@ def test_extract_messages_model_from_body(tmp_path):
         }
     ]
     created = extract_messages(store, session_id="s1", client="claude", records=records)
-    assert created == 1
+    assert created["user"] == 1
     with sqlite3.connect(tmp_path / "kb.sqlite3") as conn:
         row = conn.execute("SELECT model, client, session_id FROM kb_messages").fetchone()
     assert row == ("k3-256k", "claude", "s1")
+
+
+def test_extract_messages_stores_assistant_replies(tmp_path):
+    store = KbStore(tmp_path / "kb.sqlite3")
+    records = [
+        {
+            "timestamp": "2026-08-10T01:00:00Z",
+            "request": {
+                "method": "POST",
+                "path": "/v1/messages",
+                "body": {
+                    "model": "k3-256k",
+                    "messages": [{"role": "user", "content": "how do I fix the race condition"}],
+                },
+            },
+            "response": {
+                "status": 200,
+                "body": {
+                    "content": [
+                        {"type": "thinking", "thinking": "reasoning here"},
+                        {"type": "text", "text": "use a lock ordering protocol to fix the race condition"},
+                    ]
+                },
+            },
+        }
+    ]
+    created = extract_messages(store, session_id="s1", client="claude", records=records)
+    assert created == {"user": 1, "assistant": 1}
+    rows = {(row["role"], row["text"]) for row in store.pending_messages(10)}
+    assert ("user", "how do I fix the race condition") in rows
+    assert ("assistant", "use a lock ordering protocol to fix the race condition") in rows
+    # 重抽幂等：去重键 (hash, client, role) 挡住重复
+    assert extract_messages(store, session_id="s1", client="claude", records=records) == {"user": 0, "assistant": 0}
 
 
 def test_extract_unprocessed_walks_trace_store(trace_db):

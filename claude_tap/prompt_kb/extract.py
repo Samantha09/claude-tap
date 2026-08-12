@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from claude_tap.prompt_kb.chunk import chunk_snapshot, content_hash
-from claude_tap.prompt_kb.messages import extract_user_messages, message_content_hash
+from claude_tap.prompt_kb.messages import extract_assistant_messages, extract_user_messages, message_content_hash
 from claude_tap.prompt_kb.store import KbStore
 from claude_tap.prompt_snapshot import snapshot_from_records
 from claude_tap.trace_store import TraceStore
@@ -20,27 +20,33 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def extract_messages(store: KbStore, *, session_id: str, client: str, records: list[dict[str, Any]]) -> int:
-    """Store user messages from a session's records into kb_messages.
+def extract_messages(store: KbStore, *, session_id: str, client: str, records: list[dict[str, Any]]) -> dict[str, int]:
+    """Store user messages and assistant replies into kb_messages.
 
-    Returns the number of newly created (non-deduped) message chunks.
+    Returns {"user": n, "assistant": m} counts of newly created
+    (non-deduped) message chunks per role.
     """
-    created = 0
-    for msg in extract_user_messages(records):
-        body = _record_model(records[msg.record_index])
-        _id, was_created = store.upsert_message(
-            session_id=session_id,
-            record_index=msg.record_index,
-            message_index=msg.message_index,
-            client=client,
-            model=body,
-            timestamp=msg.timestamp,
-            content_hash=message_content_hash(msg.text),
-            text=msg.text,
-            seen_at=msg.timestamp or datetime.now(timezone.utc).isoformat(),
-        )
-        if was_created:
-            created += 1
+    created = {"user": 0, "assistant": 0}
+    for role, messages in (
+        ("user", extract_user_messages(records)),
+        ("assistant", extract_assistant_messages(records)),
+    ):
+        for msg in messages:
+            body = _record_model(records[msg.record_index])
+            _id, was_created = store.upsert_message(
+                session_id=session_id,
+                record_index=msg.record_index,
+                message_index=msg.message_index,
+                client=client,
+                model=body,
+                timestamp=msg.timestamp,
+                content_hash=message_content_hash(msg.text),
+                text=msg.text,
+                seen_at=msg.timestamp or datetime.now(timezone.utc).isoformat(),
+                role=role,
+            )
+            if was_created:
+                created[role] += 1
     return created
 
 
