@@ -2506,3 +2506,80 @@ async def test_kimi_code_model_probe_error_marks_probe_only_session_failed(trace
     assert payload is not None
     assert payload["session"]["status"] == "error"
     assert payload["session"]["error"] == "missing bearer token"
+
+
+@pytest.mark.asyncio
+async def test_dashboard_detail_appends_new_records_without_full_rerender(trace_db) -> None:
+    playwright = pytest.importorskip("playwright.async_api")
+    store = get_trace_store()
+    session_id = store.create_session(client="claude", proxy_mode="reverse")
+    for turn in range(1, 31):
+        store.append_record(session_id, _anthropic_record(turn=turn))
+
+    server = LiveViewerServer(port=0, dashboard_mode=True)
+    port = await server.start()
+    try:
+        async with playwright.async_playwright() as pw:
+            browser = await pw.chromium.launch(headless=True)
+            try:
+                page = await browser.new_page()
+                # The app defaults to zh-CN; these assertions expect English UI strings.
+                await page.add_init_script("localStorage.setItem('claude-tap-lang', 'en')")
+                await page.goto(
+                    f"http://127.0.0.1:{port}/dashboard/session/{session_id}",
+                    wait_until="domcontentloaded",
+                )
+                await page.wait_for_selector(".records .section", timeout=5000)
+                # Initial render is capped at MAX_INLINE_DETAIL_RECORDS (10).
+                await page.wait_for_function(
+                    "document.querySelectorAll('.records .section').length === 10",
+                    timeout=5000,
+                )
+
+                # Open the first record's JSON panel, scroll down, and tag DOM
+                # nodes so a full innerHTML rebuild would be detectable. The
+                # anchor section tracks the visual scroll position (its viewport
+                # offset), which must survive content changes above/below it.
+                await page.locator(".records .section >> nth=0 >> .json-btn").click()
+                await page.wait_for_selector("#json-0.open", timeout=5000)
+                anchor_before = await page.evaluate(
+                    """() => {
+                      const main = document.querySelector('.main');
+                      main.scrollTop = 400;
+                      document.querySelector('.records .section').dataset.keepMarker = '1';
+                      const sections = [...document.querySelectorAll('.records .section')];
+                      const anchor = sections.find(
+                        s => s.getBoundingClientRect().bottom > main.getBoundingClientRect().top
+                      );
+                      anchor.dataset.anchor = '1';
+                      return { scroll: main.scrollTop, top: anchor.getBoundingClientRect().top };
+                    }"""
+                )
+                assert anchor_before["scroll"] > 0
+
+                # A new record arrives while the user is reading; the store watcher
+                # broadcasts a refresh within ~1s.
+                store.append_record(session_id, _anthropic_record(turn=31))
+                await page.wait_for_function(
+                    "document.querySelectorAll('.records .section').length === 31",
+                    timeout=10000,
+                )
+
+                # The existing DOM must survive: same node, JSON panel still open,
+                # and the anchor section keeps its visual position on screen.
+                assert (
+                    await page.evaluate("document.querySelector('.records .section').dataset.keepMarker || ''") == "1"
+                )
+                assert await page.evaluate("document.querySelector('#json-0').classList.contains('open')")
+                anchor_after = await page.evaluate(
+                    """() => ({
+                      scroll: document.querySelector('.main').scrollTop,
+                      top: document.querySelector('[data-anchor]').getBoundingClientRect().top,
+                    })"""
+                )
+                assert anchor_after["scroll"] > 0
+                assert abs(anchor_after["top"] - anchor_before["top"]) < 5
+            finally:
+                await browser.close()
+    finally:
+        await server.stop()

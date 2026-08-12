@@ -1337,6 +1337,7 @@ const state = {
 	  detailRecordTotal: 0,
 	  detailFingerprint: "",
 	  detailSession: null,
+	  detailRecords: [],
 	};
 
 const $ = selector => document.querySelector(selector);
@@ -1952,10 +1953,16 @@ function updateTracePathBar(session = null) {
       const selected = state.sessions.find(session => session.id === state.selectedSessionId);
       const detailLoaded = state.detailSessionId === state.selectedSessionId;
       const selectedFingerprint = selected ? sessionDetailFingerprint(selected) : "";
-      if (!detailLoaded || refreshDetail || !selected || (selected && selectedFingerprint !== state.detailFingerprint)) {
+      if (!detailLoaded || refreshDetail || !selected) {
         if (!detailLoaded) showDetailLoading(state.selectedSessionId);
         await loadSession(state.selectedSessionId, {preserveLoaded: true});
-      } else if (selected) {
+      } else if (selectedFingerprint !== state.detailFingerprint) {
+        if (sessionRecordCount(selected) >= state.detailRecordsLoaded) {
+          await appendSessionRecords(selected);
+        } else {
+          await loadSession(state.selectedSessionId, {preserveLoaded: true});
+        }
+      } else {
         updateDetailSessionSummary(selected);
       }
     } else if (state.view !== "kb" && state.view !== "stats") {
@@ -2422,6 +2429,7 @@ function showListView() {
   state.detailRecordTotal = 0;
   state.detailFingerprint = "";
   state.detailSession = null;
+  state.detailRecords = [];
   document.body.classList.remove("detail-route");
   $("#list-view").classList.remove("hidden");
   $("#detail-view").classList.add("hidden");
@@ -2844,6 +2852,46 @@ async function loadSession(sessionId, {preserveLoaded = false} = {}) {
   }
 }
 
+async function appendSessionRecords(session) {
+  const sessionId = session.id;
+  const offset = state.detailRecordsLoaded;
+  const limit = Math.max(sessionRecordCount(session) - offset, 0);
+  if (!limit) {
+    updateDetailSessionSummary(session);
+    return;
+  }
+  try {
+    const payload = await fetchJSON(`/api/sessions/${encodeURIComponent(sessionId)}/records?offset=${offset}&limit=${limit}`);
+    if (state.selectedSessionId !== sessionId || state.detailSessionId !== sessionId) return;
+    if (state.detailRecordsLoaded !== offset) return;
+    const container = document.querySelector("#raw-tab .records");
+    if (!container) {
+      await loadSession(sessionId, {preserveLoaded: true});
+      return;
+    }
+    const newRecords = payload.records || [];
+    if (newRecords.length) {
+      container.querySelector(":scope > .empty")?.remove();
+      container.insertAdjacentHTML(
+        "beforeend",
+        newRecords.map((record, index) => renderRecord(record, offset + index)).join("")
+      );
+      state.detailRecords = (state.detailRecords || []).concat(newRecords);
+      attachJsonToggleHandlers(container, state.detailRecords);
+      state.detailRecordsLoaded = offset + newRecords.length;
+    }
+    state.detailRecordTotal = Number(payload.session?.record_count ?? state.detailRecordsLoaded);
+    if (state.detailRecordsLoaded >= state.detailRecordTotal) {
+      document.querySelector("#raw-tab .detail-fallback-note")?.remove();
+      document.querySelector("#raw-tab .detail-load-more")?.remove();
+    }
+    updateDetailSessionSummary(payload.session || session);
+  } catch (error) {
+    console.error(error);
+    await loadSession(sessionId, {preserveLoaded: true});
+  }
+}
+
 async function loadMoreSessionRecords(session, records, button) {
   const sessionId = session.id;
   const offset = records.length;
@@ -2873,6 +2921,7 @@ async function loadMoreSessionRecords(session, records, button) {
   state.detailRecordTotal = totalRecords;
   state.detailFingerprint = sessionDetailFingerprint(session);
   state.detailSession = session;
+  state.detailRecords = records;
   $("#detail-title").textContent = t("session_details", {agent: session.agent || t("session_detail")});
   $("#detail-subtitle").textContent = session.legacy_rel_path || session.id || "";
   updateTracePathBar(session);
@@ -2905,7 +2954,17 @@ async function loadMoreSessionRecords(session, records, button) {
   document.querySelector("[data-tab-toggle]")?.addEventListener("click", event => {
     setDetailTab(event.currentTarget.dataset.tab, session);
   });
-  document.querySelectorAll("[data-json-toggle]").forEach(button => {
+  attachJsonToggleHandlers(document, records);
+  document.querySelectorAll("[data-load-more]").forEach(button => {
+    button.addEventListener("click", () => loadMoreSessionRecords(session, state.detailRecords || records, button));
+  });
+  document.querySelectorAll("[data-copy-path]").forEach(button => {
+    button.addEventListener("click", () => navigator.clipboard?.writeText(button.dataset.copyPath || ""));
+  });
+}
+
+function attachJsonToggleHandlers(root, records) {
+  root.querySelectorAll("[data-json-toggle]").forEach(button => {
     button.addEventListener("click", () => {
       const panel = document.getElementById(button.dataset.jsonToggle);
       const pre = panel?.querySelector("[data-json-index]");
@@ -2916,12 +2975,6 @@ async function loadMoreSessionRecords(session, records, button) {
       }
       panel?.classList.toggle("open");
     });
-  });
-  document.querySelectorAll("[data-load-more]").forEach(button => {
-    button.addEventListener("click", () => loadMoreSessionRecords(session, records, button));
-  });
-  document.querySelectorAll("[data-copy-path]").forEach(button => {
-    button.addEventListener("click", () => navigator.clipboard?.writeText(button.dataset.copyPath || ""));
   });
 }
 
