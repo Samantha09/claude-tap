@@ -5,7 +5,9 @@ import hashlib
 import pytest
 
 from claude_tap.prompt_kb.messages import (
+    MIN_ASSISTANT_CHARS,
     _keep_text,
+    extract_assistant_messages,
     extract_user_messages,
     message_content_hash,
 )
@@ -252,3 +254,100 @@ def test_unknown_provider_and_empty_body_skipped():
         _record({"messages": [{"role": "assistant", "content": "hi"}]}),
     ]
     assert extract_user_messages(records) == []
+
+
+def _assistant_record(resp_body, path="/v1/messages", timestamp="2026-08-10T01:00:00Z"):
+    return {
+        "timestamp": timestamp,
+        "request": {"method": "POST", "path": path, "body": {}},
+        "response": {"status": 200, "body": resp_body},
+    }
+
+
+LONG = "this is a sufficiently long assistant reply explaining the fix"
+
+
+def test_anthropic_assistant_text_only():
+    records = [
+        _assistant_record(
+            {
+                "content": [
+                    {"type": "thinking", "thinking": "let me think about this problem"},
+                    {"type": "text", "text": LONG},
+                    {"type": "tool_use", "name": "Bash", "input": {"command": "ls"}},
+                ]
+            }
+        )
+    ]
+    msgs = extract_assistant_messages(records)
+    assert [m.text for m in msgs] == [LONG]
+    assert msgs[0].record_index == 0 and msgs[0].message_index == 0
+    assert msgs[0].timestamp == "2026-08-10T01:00:00Z"
+
+
+def test_openai_chat_assistant_text():
+    records = [
+        _assistant_record(
+            {"choices": [{"message": {"role": "assistant", "content": LONG}}]},
+            path="/v1/chat/completions",
+        )
+    ]
+    assert [m.text for m in extract_assistant_messages(records)] == [LONG]
+
+
+def test_openai_responses_assistant_text():
+    records = [
+        _assistant_record(
+            {
+                "output": [
+                    {"type": "reasoning", "summary": []},
+                    {
+                        "type": "message",
+                        "content": [{"type": "output_text", "text": LONG}],
+                    },
+                    {"type": "function_call", "name": "shell", "arguments": "{}"},
+                ]
+            },
+            path="/v1/responses",
+        )
+    ]
+    assert [m.text for m in extract_assistant_messages(records)] == [LONG]
+
+
+def test_gemini_assistant_text_skips_thought_parts():
+    records = [
+        _assistant_record(
+            {
+                "candidates": [
+                    {
+                        "content": {
+                            "parts": [
+                                {"text": "hidden reasoning", "thought": True},
+                                {"text": LONG},
+                            ]
+                        }
+                    }
+                ]
+            },
+            path="/v1beta/models/gemini-2.0-flash:generateContent",
+        )
+    ]
+    assert [m.text for m in extract_assistant_messages(records)] == [LONG]
+
+
+def test_short_and_empty_replies_dropped():
+    records = [
+        _assistant_record({"content": [{"type": "text", "text": "好的"}]}),
+        _assistant_record({"content": [{"type": "tool_use", "name": "Bash", "input": {}}]}),
+        {"timestamp": "t", "request": {"path": "/v1/messages"}, "response": {"status": 200}},  # no body
+    ]
+    assert extract_assistant_messages(records) == []
+    assert MIN_ASSISTANT_CHARS == 20
+
+
+def test_long_reply_split_into_pieces():
+    piece = "paragraph with enough words to pass the minimum length filter. "
+    records = [_assistant_record({"content": [{"type": "text", "text": (piece * 60)}]})]
+    msgs = extract_assistant_messages(records)
+    assert len(msgs) > 1
+    assert [m.message_index for m in msgs] == list(range(len(msgs)))

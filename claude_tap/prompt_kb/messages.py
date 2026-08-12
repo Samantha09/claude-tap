@@ -1,4 +1,4 @@
-"""Extract user messages from trace records for semantic session search.
+"""Extract user and assistant messages from trace records for semantic session search.
 
 Only genuine user-authored text is kept: tool results, harness-injected
 pseudo-user messages (<system-reminder>, command envelopes), empty text,
@@ -17,6 +17,8 @@ from claude_tap.prompt_kb.chunk import MAX_SECTION_CHARS, _split_long
 from claude_tap.prompt_snapshot import _content_text, _request_body, infer_provider
 
 _HARNESS_PREFIXES = ("<system-reminder", "<command-message", "<local-command")
+
+MIN_ASSISTANT_CHARS = 20  # short acknowledgements carry no search value
 
 # Drop rules ported from claude_tap.viewer._clean_session_user_text: harness
 # boilerplate injected by Codex/Gemini CLIs as role=user messages. Only the
@@ -58,6 +60,14 @@ class UserMessage:
     text: str
 
 
+@dataclass(frozen=True)
+class AssistantMessage:
+    record_index: int
+    message_index: int
+    timestamp: str
+    text: str
+
+
 def message_content_hash(text: str) -> str:
     normalized = "\n".join(line.rstrip() for line in text.splitlines()).strip()
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
@@ -90,6 +100,96 @@ def _split_message(text: str) -> list[str]:
     if len(text) <= MAX_SECTION_CHARS:
         return [text]
     return [piece for _title, piece in _split_long("", text)]
+
+
+def extract_assistant_messages(records: list[dict[str, Any]]) -> list[AssistantMessage]:
+    """Extract assistant reply text from response bodies.
+
+    Only visible text is kept: thinking blocks, tool calls, and replies
+    shorter than MIN_ASSISTANT_CHARS are dropped. Malformed/missing response
+    bodies are skipped silently (pure reads; nothing transient to retry).
+    """
+    out: list[AssistantMessage] = []
+    for record_index, record in enumerate(records):
+        body = _response_body(record)
+        if not body:
+            continue
+        text = _assistant_text(infer_provider(record), body).strip()
+        if len(text) < MIN_ASSISTANT_CHARS:
+            continue
+        for message_index, piece in enumerate(_split_message(text)):
+            out.append(
+                AssistantMessage(
+                    record_index=record_index,
+                    message_index=message_index,
+                    timestamp=str(record.get("timestamp") or ""),
+                    text=piece,
+                )
+            )
+    return out
+
+
+def _response_body(record: dict[str, Any]) -> dict[str, Any]:
+    resp = record.get("response") if isinstance(record.get("response"), dict) else {}
+    body = resp.get("body")
+    return body if isinstance(body, dict) else {}
+
+
+def _assistant_text(provider: str, body: dict[str, Any]) -> str:
+    if provider == "anthropic":
+        content = body.get("content")
+        if not isinstance(content, list):
+            return ""
+        texts = [
+            block["text"]
+            for block in content
+            if isinstance(block, dict) and block.get("type") == "text" and isinstance(block.get("text"), str)
+        ]
+        return "\n\n".join(t.strip() for t in texts if t.strip())
+    if provider == "openai":
+        return _openai_assistant_text(body)
+    if provider == "gemini":
+        candidates = body.get("candidates")
+        if not isinstance(candidates, list):
+            return ""
+        texts: list[str] = []
+        for cand in candidates:
+            content = cand.get("content") if isinstance(cand, dict) else None
+            parts = content.get("parts") if isinstance(content, dict) else None
+            if not isinstance(parts, list):
+                continue
+            texts.extend(
+                part["text"]
+                for part in parts
+                if isinstance(part, dict) and isinstance(part.get("text"), str) and not part.get("thought")
+            )
+        return "\n\n".join(t.strip() for t in texts if t.strip())
+    return ""
+
+
+def _openai_assistant_text(body: dict[str, Any]) -> str:
+    texts: list[str] = []
+    choices = body.get("choices")
+    if isinstance(choices, list):
+        for choice in choices:
+            message = choice.get("message") if isinstance(choice, dict) else None
+            if isinstance(message, dict):
+                texts.append(_content_text(message.get("content")))
+    output = body.get("output")
+    if isinstance(output, list):
+        for item in output:
+            if not isinstance(item, dict) or item.get("type") != "message":
+                continue
+            content = item.get("content")
+            if isinstance(content, str):
+                texts.append(content)
+            elif isinstance(content, list):
+                texts.extend(
+                    part["text"]
+                    for part in content
+                    if isinstance(part, dict) and part.get("type") == "output_text" and isinstance(part.get("text"), str)
+                )
+    return "\n\n".join(t.strip() for t in texts if t.strip())
 
 
 def _user_texts(provider: str, body: dict[str, Any]) -> list[str]:
