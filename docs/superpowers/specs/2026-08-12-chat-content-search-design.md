@@ -170,3 +170,54 @@ BOILERPLATE_TITLES = {"environment", "context management", "harness", "session-s
 | rel_delta=0.05 在新分数分布下不合适 | 参数化暴露，dashboard 滑块可叠加绝对门槛；实测对比后可调默认值 |
 | 回复正文含敏感信息 | 与 trace 库同级本地存储，不新增外发路径（沿用既有结论） |
 | 回填期间搜索结果新旧混杂 | 渐进索引 pending 计数可见；回填幂等可重入 |
+
+## 实施验证
+
+**日期**：2026-08-12（Task 8，分支 dev/trace-semantic-search）
+
+### 回归
+
+- 全量单测：`.venv/bin/pytest tests/ --ignore=tests/test_e2e.py -q` → **1156 passed, 26 skipped**（82s）
+- e2e：`.venv/bin/pytest tests/test_e2e.py -v --timeout=120` → **68 passed**（23s）
+
+### 迁移与回填（before → after）
+
+执行 Task 8 时真实库（`~/.local/share/claude-tap/prompt_kb.sqlite3`）的迁移已在 Task 1–7 开发/验证期间应用，
+故无法复现 `messages_assistant=0` 的迁移前状态；改为验证迁移幂等性与全量 reindex 正确性。
+
+| 指标 | 基线（2026-08-12 实测） | Task 8 时 |
+|---|---|---|
+| snapshots | 10 | 10 |
+| chunks | 383 | **334**（样板 section 一次性清除 −49） |
+| messages_user | 488 | **1079**（当日新增会话累积；user 抽取逻辑未变） |
+| messages_assistant | 0 | **858** |
+| pending / failed | — | 0 / 0 |
+
+全量 reindex（`claude-tap kb reindex`，uv tool 环境）：`indexed=334 failed=0 messages_indexed=1937 messages_failed=0`，
+耗时约 71s（e5-small 本地缓存）。注：repo `.venv` 未装 `claude-tap[rag]`，验证使用 uv tool editable 安装
+（同一份代码 + sentence-transformers 5.7.0）。
+
+### 7 组查询验收
+
+| # | 查询 | 判定 | 关键结果 |
+|---|---|---|---|
+| 1 | 哪个 CLI 有沙箱 shell 工具 | ✅ | 无 Environment/Context management/Harness 命中；Bash 进入 top-3 组（0.826/0.825）；getDiagnostics 仍居首（0.850，见遗留） |
+| 2 | which CLI has a sandboxed shell tool | ✅ | 无样板命中；**Bash 升为 top 组首命中（0.849）**，此前仅 ~第 3（0.826） |
+| 3 | 怎么写 commit message | ✅ | 无样板/无同内容跨快照重复；messages 区命中 commit 相关 assistant/user |
+| 4 | 前端页面截图验证 | ✅ | messages 区 top 命中 assistant 回答（"好，启动 dashboard 并截图验证"，0.896），带 role 标注 |
+| 5 | 取消定时任务 cron（kind=tool） | ✅ | **CronDelete 仍居首（0.902）**，单一 group，回归保护成立 |
+| 6 | 沙箱 sandbox 执行命令（min_score=0.86） | ✅（带遗留） | chunks 仍为空（新分布下无 chunk ≥0.86）；messages 区 top 变为 assistant 内容（0.887），不再只有代码 dump |
+| 7 | Playwright 浏览器截图验证（kind=prompt_section） | ✅ | messages 区 top 命中 assistant "playwright + 本机 Chrome 验证通过"（0.924） |
+
+全查询公共验收：
+
+- **无跨快照同内容重复**：以 (kind, title, text) 全键校验 6 组有 chunk 结果的查询，同一内容均只出现一次 ✅
+- **长尾截断**：每组 hits ≤3（代码强制）；rel_delta 相对阈值生效（Q4→2 组、Q5→1 组、Q6→0 chunk）✅
+- **role 透传**：所有查询 messages 区命中均带 role，user/assistant 均可被检索 ✅
+
+### 遗留问题
+
+1. 中文查询（Q1）下 `mcp__ide__getDiagnostics`（0.850）仍排在 `Bash`（0.826）之前——e5-small 对
+   中文短查询的区分度限制，非回归；英文查询已修正。后续可考虑更强多语模型或查询侧改写。
+2. 绝对分阈值（min_score=0.86）在新分数分布下仍会全灭 chunks 区，且 messages 区中段仍混入代码 dump
+   （0.869–0.880）。绝对分数未校准，属 spec 风险表已收录项；建议下游默认用 rel_delta 而非绝对阈值。
