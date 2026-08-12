@@ -1,5 +1,7 @@
 """kb_messages storage: migration, dedup upsert, index state machine."""
 
+import sqlite3
+
 from claude_tap.prompt_kb.store import KbStore
 
 
@@ -95,3 +97,67 @@ def test_stats_counts_messages(tmp_path):
     stats = store.stats()
     assert stats["messages"] == 1
     assert stats["chunks"] == 0  # existing keys untouched
+
+
+def test_same_text_user_and_assistant_both_stored(tmp_path):
+    store = KbStore(tmp_path / "kb.sqlite3")
+    _, c1 = store.upsert_message(**_msg())
+    _, c2 = store.upsert_message(**_msg(role="assistant", record_index=1))
+    assert c1 is True and c2 is True
+    assert len(store.pending_messages(10)) == 2
+
+
+def test_upsert_dedup_within_same_role(tmp_path):
+    store = KbStore(tmp_path / "kb.sqlite3")
+    _, c1 = store.upsert_message(**_msg(role="assistant"))
+    _, c2 = store.upsert_message(**_msg(role="assistant", session_id="s2"))
+    assert c1 is True and c2 is False
+    assert len(store.pending_messages(10)) == 1
+
+
+def test_stats_split_by_role(tmp_path):
+    store = KbStore(tmp_path / "kb.sqlite3")
+    store.upsert_message(**_msg())
+    store.upsert_message(**_msg(role="assistant", content_hash="h2", text="a longer assistant reply text"))
+    stats = store.stats()
+    assert stats["messages"] == 2
+    assert stats["messages_user"] == 1
+    assert stats["messages_assistant"] == 1
+
+
+def test_migrate_old_db_adds_role_and_resets_backfill(tmp_path):
+    """旧 schema 库（无 role 列、旧去重索引）打开后：role 迁移、索引重建、messages_done 重置。"""
+    db = tmp_path / "kb.sqlite3"
+    conn = sqlite3.connect(db)
+    conn.executescript(
+        """
+        CREATE TABLE kb_messages (
+          id INTEGER PRIMARY KEY, session_id TEXT NOT NULL, record_index INTEGER NOT NULL,
+          message_index INTEGER NOT NULL, client TEXT NOT NULL, model TEXT NOT NULL,
+          timestamp TEXT NOT NULL, content_hash TEXT NOT NULL, text TEXT NOT NULL,
+          last_seen TEXT NOT NULL, embedding BLOB,
+          index_state TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE UNIQUE INDEX idx_kb_messages_dedup ON kb_messages(content_hash, client);
+        CREATE TABLE kb_sources (
+          session_id TEXT PRIMARY KEY, snapshot_id INTEGER,
+          processed_at TEXT NOT NULL, messages_done INTEGER NOT NULL DEFAULT 0
+        );
+        INSERT INTO kb_messages (session_id, record_index, message_index, client, model,
+          timestamp, content_hash, text, last_seen)
+        VALUES ('s1', 0, 0, 'claude', 'k3', 't', 'h1', 'old row text', 't');
+        INSERT INTO kb_sources (session_id, snapshot_id, processed_at, messages_done)
+        VALUES ('s1', NULL, 't', 1);
+        """
+    )
+    conn.close()
+    store = KbStore(db)  # 触发迁移
+    rows = store.pending_messages(10)
+    assert rows[0]["role"] == "user"  # 存量行默认 user
+    with sqlite3.connect(db) as check:
+        cols = [r[1] for r in check.execute("PRAGMA table_info(kb_messages)").fetchall()]
+        idx_cols = [r[2] for r in check.execute("PRAGMA index_info(idx_kb_messages_dedup)").fetchall()]
+        done = check.execute("SELECT messages_done FROM kb_sources WHERE session_id='s1'").fetchone()[0]
+    assert "role" in cols
+    assert idx_cols == ["content_hash", "client", "role"]
+    assert done == 0  # 回填被触发

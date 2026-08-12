@@ -61,11 +61,12 @@ CREATE TABLE IF NOT EXISTS kb_messages (
   last_seen TEXT NOT NULL,
   embedding BLOB,
   index_state TEXT NOT NULL DEFAULT 'pending',
-  attempts INTEGER NOT NULL DEFAULT 0
+  attempts INTEGER NOT NULL DEFAULT 0,
+  role TEXT NOT NULL DEFAULT 'user'
 );
 CREATE INDEX IF NOT EXISTS idx_kb_messages_state ON kb_messages(index_state);
 CREATE INDEX IF NOT EXISTS idx_kb_messages_session ON kb_messages(session_id);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_kb_messages_dedup ON kb_messages(content_hash, client);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_kb_messages_dedup ON kb_messages(content_hash, client, role);
 """
 
 
@@ -94,6 +95,16 @@ class KbStore:
         source_columns = {row["name"] for row in conn.execute("PRAGMA table_info(kb_sources)")}
         if "messages_done" not in source_columns:
             conn.execute("ALTER TABLE kb_sources ADD COLUMN messages_done INTEGER NOT NULL DEFAULT 0")
+        message_columns = {row["name"] for row in conn.execute("PRAGMA table_info(kb_messages)")}
+        if "role" not in message_columns:
+            conn.execute("ALTER TABLE kb_messages ADD COLUMN role TEXT NOT NULL DEFAULT 'user'")
+            conn.execute("DROP INDEX IF EXISTS idx_kb_messages_dedup")
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_kb_messages_dedup ON kb_messages(content_hash, client, role)"
+            )
+            # Trigger a full message backfill: assistant replies are net-new,
+            # user messages dedup idempotently under the new (hash, client, role) key.
+            conn.execute("UPDATE kb_sources SET messages_done = 0")
 
     @classmethod
     def default(cls) -> "KbStore":
@@ -236,17 +247,18 @@ class KbStore:
         timestamp: str,
         content_hash: str,
         text: str,
+        role: str = "user",
         seen_at: str,
     ) -> tuple[int, bool]:
-        """Insert a user-message chunk; dedup on (content_hash, client).
+        """Insert a message chunk; dedup on (content_hash, client, role).
 
         Returns (message_id, created). On dedup hit only last_seen is updated
         and the first-seen session_id is kept.
         """
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT id FROM kb_messages WHERE content_hash=? AND client=?",
-                (content_hash, client),
+                "SELECT id FROM kb_messages WHERE content_hash=? AND client=? AND role=?",
+                (content_hash, client, role),
             ).fetchone()
             if row is not None:
                 conn.execute(
@@ -257,16 +269,17 @@ class KbStore:
             cur = conn.execute(
                 """INSERT INTO kb_messages
                    (session_id, record_index, message_index, client, model,
-                    timestamp, content_hash, text, last_seen)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (session_id, record_index, message_index, client, model, timestamp, content_hash, text, seen_at),
+                    timestamp, content_hash, text, last_seen, role)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (session_id, record_index, message_index, client, model, timestamp, content_hash, text, seen_at, role),
             )
             return int(cur.lastrowid), True
 
     def pending_messages(self, limit: int) -> list[sqlite3.Row]:
         with self._connect() as conn:
             return conn.execute(
-                "SELECT id, session_id, text, last_seen FROM kb_messages WHERE index_state='pending' ORDER BY id LIMIT ?",
+                """SELECT id, session_id, text, last_seen, role
+                   FROM kb_messages WHERE index_state='pending' ORDER BY id LIMIT ?""",
                 (limit,),
             ).fetchall()
 
@@ -295,7 +308,7 @@ class KbStore:
     def indexed_messages(self) -> list[sqlite3.Row]:
         with self._connect() as conn:
             return conn.execute(
-                """SELECT id, session_id, client, model, timestamp, text, embedding
+                """SELECT id, session_id, client, model, timestamp, text, embedding, role
                    FROM kb_messages WHERE index_state='indexed'"""
             ).fetchall()
 
@@ -338,6 +351,10 @@ class KbStore:
                 row["index_state"]: row["c"]
                 for row in conn.execute("SELECT index_state, COUNT(*) c FROM kb_chunks GROUP BY index_state")
             }
+            by_role = {
+                row["role"]: row["c"]
+                for row in conn.execute("SELECT role, COUNT(*) c FROM kb_messages GROUP BY role")
+            }
             return {
                 "snapshots": int(snapshots),
                 "chunks": int(chunks),
@@ -345,4 +362,6 @@ class KbStore:
                 "failed": int(by_state.get("failed", 0)),
                 "indexed": int(by_state.get("indexed", 0)),
                 "messages": int(conn.execute("SELECT COUNT(*) c FROM kb_messages").fetchone()["c"]),
+                "messages_user": int(by_role.get("user", 0)),
+                "messages_assistant": int(by_role.get("assistant", 0)),
             }
