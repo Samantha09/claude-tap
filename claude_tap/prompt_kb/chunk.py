@@ -13,6 +13,10 @@ from claude_tap.prompt_snapshot import PromptSnapshot, PromptTool
 MAX_SECTION_CHARS = 2000
 MIN_SECTION_CHARS = 200
 
+# Harness-injected template sections: present in nearly every snapshot, low
+# information value, and their git/shell/CLI vocabulary poisons similarity.
+BOILERPLATE_TITLES = frozenset({"environment", "context management", "harness", "session-specific guidance"})
+
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
 
 
@@ -37,6 +41,8 @@ def _split_prompt(text: str) -> list[Chunk]:
     merged = _merge_small(sections)
     chunks: list[Chunk] = []
     for title, body in merged:
+        if title.strip().lower() in BOILERPLATE_TITLES:
+            continue
         for piece in _split_long(title, body):
             chunks.append(Chunk(kind="prompt_section", title=piece[0], text=piece[1]))
     return chunks

@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 from claude_tap.prompt_kb.chunk import chunk_snapshot, content_hash
 from claude_tap.prompt_snapshot import PromptSnapshot, PromptTool
 
@@ -71,3 +73,17 @@ def test_content_hash_changes_with_tool_schema_internals():
     snap_a = _snapshot(tools=(PromptTool(name="shell", description="run", schema=base),))
     snap_b = _snapshot(tools=(PromptTool(name="shell", description="run", schema=changed),))
     assert content_hash("codex", "gpt-5", snap_a) != content_hash("codex", "gpt-5", snap_b)
+
+
+def test_boilerplate_sections_skipped():
+    from claude_tap.prompt_kb.chunk import BOILERPLATE_TITLES
+
+    env = "# Environment\n" + ("working directory and platform details. " * 20)
+    style = "# Style Guide\n" + ("write elegant prose with care. " * 20)
+    snapshot = SimpleNamespace(
+        system_prompt=f"{env}\n\n{style}", developer_prompt="", tools=[]
+    )
+    chunks = chunk_snapshot(snapshot)
+    assert chunks and all(c.title != "Environment" for c in chunks)
+    assert any(c.title == "Style Guide" for c in chunks)
+    assert "environment" in BOILERPLATE_TITLES

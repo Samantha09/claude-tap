@@ -113,3 +113,23 @@ def test_connect_sets_busy_timeout(trace_db):
         assert conn.execute("PRAGMA busy_timeout").fetchone()[0] == 2000
     finally:
         conn.close()
+
+
+def test_boilerplate_chunks_purged_once(tmp_path):
+    db = tmp_path / "kb.sqlite3"
+    store = KbStore(db)
+    sid, _ = store.upsert_snapshot(
+        content_hash="h1", client="claude", provider="anthropic", model="k3",
+        system_prompt="s", developer_prompt="", tools_json="[]", seen_at="t",
+    )
+    store.replace_chunks(sid, [("prompt_section", "Environment", "boilerplate"),
+                               ("prompt_section", "Style", "real content")])
+    store.set_meta("boilerplate_purged", "0")  # 模拟未清除状态
+    KbStore(db)  # 重开触发一次性清除（标记非 "1" 即执行）
+    rows = store.indexed_chunks()
+    assert [r["title"] for r in rows] == []  # 未索引不在 indexed_chunks
+    with sqlite3.connect(db) as conn:
+        titles = [r[0] for r in conn.execute("SELECT title FROM kb_chunks").fetchall()]
+        purged = conn.execute("SELECT value FROM kb_meta WHERE key='boilerplate_purged'").fetchone()[0]
+    assert titles == ["Style"]
+    assert purged == "1"

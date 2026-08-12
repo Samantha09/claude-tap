@@ -10,6 +10,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
+from claude_tap.prompt_kb.chunk import BOILERPLATE_TITLES
 from claude_tap.trace_store import resolve_db_path
 
 SCHEMA = """
@@ -105,6 +106,14 @@ class KbStore:
             # Trigger a full message backfill: assistant replies are net-new,
             # user messages dedup idempotently under the new (hash, client, role) key.
             conn.execute("UPDATE kb_sources SET messages_done = 0")
+        purged = conn.execute("SELECT value FROM kb_meta WHERE key='boilerplate_purged'").fetchone()
+        if purged is None or purged["value"] != "1":
+            placeholders = ",".join("?" for _ in BOILERPLATE_TITLES)
+            conn.execute(
+                f"DELETE FROM kb_chunks WHERE lower(title) IN ({placeholders})",
+                sorted(BOILERPLATE_TITLES),
+            )
+            conn.execute("INSERT OR REPLACE INTO kb_meta (key, value) VALUES ('boilerplate_purged', '1')")
 
     @classmethod
     def default(cls) -> "KbStore":
@@ -352,8 +361,7 @@ class KbStore:
                 for row in conn.execute("SELECT index_state, COUNT(*) c FROM kb_chunks GROUP BY index_state")
             }
             by_role = {
-                row["role"]: row["c"]
-                for row in conn.execute("SELECT role, COUNT(*) c FROM kb_messages GROUP BY role")
+                row["role"]: row["c"] for row in conn.execute("SELECT role, COUNT(*) c FROM kb_messages GROUP BY role")
             }
             return {
                 "snapshots": int(snapshots),
