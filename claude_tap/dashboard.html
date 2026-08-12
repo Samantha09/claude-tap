@@ -1509,7 +1509,8 @@ const DASHBOARD_I18N = {
     kb_filtered_by_score: "{n} hit(s) hidden by the min-score filter",
     kb_messages_section: "Sessions",
     kb_view_session: "View session →",
-    kb_kind_message: "Message"
+    kb_kind_message: "Message",
+    kb_role_user: "Question", kb_role_assistant: "Answer", kb_chunks_section: "Prompt snapshots",
   },
   "zh-CN": {
     document_title: "claude-tap 会话面板",
@@ -1651,7 +1652,8 @@ const DASHBOARD_I18N = {
     kb_filtered_by_score: "{n} 条结果被最低分数过滤掉了",
     kb_messages_section: "会话",
     kb_view_session: "查看会话 →",
-    kb_kind_message: "消息"
+    kb_kind_message: "消息",
+    kb_role_user: "提问", kb_role_assistant: "回答", kb_chunks_section: "Prompt 快照",
   }
 };
 
@@ -2564,6 +2566,13 @@ function kbFilterMessageGroups(groups, minScore) {
     .filter(g => g.hits.length);
 }
 
+function kbHitBadge(hit) {
+  if (hit.kind === "tool") return ["tool", "kb_kind_tool"];
+  if (hit.kind === "user_message") return ["message", "kb_role_user"];
+  if (hit.kind === "assistant_message") return ["message", "kb_role_assistant"];
+  return ["prompt", "kb_kind_prompt"];
+}
+
 function renderKbResults(results, messages = []) {
   kbLastGroups = results || [];
   kbLastMessages = messages || [];
@@ -2595,7 +2604,18 @@ function kbRenderFiltered() {
     ));
     return;
   }
+  if (msgGroups.length) {
+    const section = document.createElement("div");
+    section.className = "kb-section-title";
+    section.textContent = t("kb_messages_section");
+    container.appendChild(section);
+    for (const g of msgGroups) container.appendChild(kbRenderMessageCard(g));
+  }
   if (filtered.length) {
+    const chunkSection = document.createElement("div");
+    chunkSection.className = "kb-section-title";
+    chunkSection.textContent = t("kb_chunks_section");
+    container.appendChild(chunkSection);
     const folded = kbFoldGroups(filtered);
     const foldedCount = folded.reduce((n, f) => n + f.history.length, 0);
     const summary = document.createElement("div");
@@ -2607,13 +2627,6 @@ function kbRenderFiltered() {
     for (const { main, history } of folded) {
       container.appendChild(kbRenderGroupCard(main, true, history));
     }
-  }
-  if (msgGroups.length) {
-    const section = document.createElement("div");
-    section.className = "kb-section-title";
-    section.textContent = t("kb_messages_section");
-    container.appendChild(section);
-    for (const g of msgGroups) container.appendChild(kbRenderMessageCard(g));
   }
 }
 
@@ -2688,7 +2701,7 @@ function kbRenderMessageCard(group) {
   }
   card.appendChild(header);
   for (const hit of group.hits) card.appendChild(kbRenderHit({
-    kind: "user_message",
+    kind: hit.role === "assistant" ? "assistant_message" : "user_message",
     title: "",
     text: hit.text,
     score: hit.score,
@@ -2707,8 +2720,9 @@ function kbRenderHit(hit) {
   const head = document.createElement("div");
   head.className = "kb-hit-head";
   const badge = document.createElement("span");
-  badge.className = `kb-hit-kind ${hit.kind === "tool" ? "tool" : hit.kind === "user_message" ? "message" : "prompt"}`;
-  badge.textContent = hit.kind === "tool" ? t("kb_kind_tool") : hit.kind === "user_message" ? t("kb_kind_message") : t("kb_kind_prompt");
+  const [badgeClass, badgeKey] = kbHitBadge(hit);
+  badge.className = `kb-hit-kind ${badgeClass}`;
+  badge.textContent = t(badgeKey);
   const title = document.createElement("span");
   title.className = "kb-hit-title";
   title.textContent = hit.title;

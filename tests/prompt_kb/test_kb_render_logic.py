@@ -46,7 +46,7 @@ def _group(client, model, first_seen, scores):
 
 def test_js_functions_exist_in_template():
     html = read_dashboard_template()
-    for fn in ("kbBestScore", "kbFilterHits", "kbFoldGroups", "kbScoreClass"):
+    for fn in ("kbBestScore", "kbFilterHits", "kbFoldGroups", "kbScoreClass", "kbHitBadge"):
         assert f"function {fn}(" in html, fn
 
 
@@ -105,6 +105,23 @@ def test_filter_message_groups():
     filtered = filter_message_groups(groups, 0.5)
     assert [g["session_id"] for g in filtered] == ["s1"]
     assert len(filtered[0]["hits"]) == 1
+
+
+def hit_badge(hit):
+    kind = hit.get("kind", "")
+    if kind == "tool":
+        return ("tool", "kb_kind_tool")
+    if kind == "user_message":
+        return ("message", "kb_role_user")
+    if kind == "assistant_message":
+        return ("message", "kb_role_assistant")
+    return ("prompt", "kb_kind_prompt")
+
+
+def test_hit_badge_roles():
+    assert hit_badge({"kind": "user_message"}) == ("message", "kb_role_user")
+    assert hit_badge({"kind": "assistant_message"}) == ("message", "kb_role_assistant")
+    assert hit_badge({"kind": "tool"}) == ("tool", "kb_kind_tool")
 
 
 def test_template_contains_message_rendering():

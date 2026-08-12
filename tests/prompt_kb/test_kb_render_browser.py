@@ -50,8 +50,24 @@ GROUPS = [
 ]
 
 
+TEST_MESSAGES = [
+    {
+        "session_id": "s1",
+        "client": "claude",
+        "model": "k3",
+        "hits": [
+            {"text": "q", "timestamp": "t1", "score": 0.9, "role": "user"},
+            {"text": "a", "timestamp": "t2", "score": 0.85, "role": "assistant"},
+        ],
+    },
+]
+
+
 def _build_html(tmp_path):
-    inject = f"<script>window.__KB_TEST_GROUPS = {json.dumps(GROUPS)};</script>"
+    inject = (
+        f"<script>window.__KB_TEST_GROUPS = {json.dumps(GROUPS)};"
+        f"window.__KB_TEST_MESSAGES = {json.dumps(TEST_MESSAGES)};</script>"
+    )
     path = tmp_path / "kb_dashboard.html"
     path.write_text(read_dashboard_template().replace("</head>", inject + "</head>", 1), encoding="utf-8")
     return path
@@ -131,6 +147,31 @@ def test_empty_state_shows_guidance(page):
     assert page.eval_on_selector_all(".kb-empty", "els => els.length") == 1
     hint = page.eval_on_selector(".kb-empty", "el => el.textContent")
     assert len(hint) > 10
+
+
+def test_messages_section_renders_before_chunks(page):
+    page.evaluate(
+        "renderKbResults(window.__KB_TEST_GROUPS, window.__KB_TEST_MESSAGES)"
+    )
+    children = page.eval_on_selector_all(
+        "#kb-results > *", "els => els.map(e => e.className)"
+    )
+    assert any("kb-section-title" in c for c in children)
+    first_section = next(c for c in children if "kb-section-title" in c)
+    idx_msg = children.index(first_section)
+    idx_summary = next((i for i, c in enumerate(children) if "kb-summary" in c), len(children))
+    assert idx_msg < idx_summary  # 会话分区在快照分区之前
+
+
+def test_role_badges_rendered(page):
+    page.evaluate(
+        "renderKbResults(window.__KB_TEST_GROUPS, window.__KB_TEST_MESSAGES)"
+    )
+    badges = page.eval_on_selector_all(
+        ".kb-message-group .kb-hit-kind", "els => els.map(e => e.textContent)"
+    )
+    # default UI language is zh-CN (verified by running the test)
+    assert "提问" in badges and "回答" in badges
 
 
 MESSAGES = [
