@@ -19,6 +19,7 @@ def _build_parser() -> argparse.ArgumentParser:
     search_parser.add_argument("--client")
     search_parser.add_argument("--kind", choices=["tool", "prompt_section"])
     search_parser.add_argument("--limit", type=int, default=10)
+    search_parser.add_argument("--rel-delta", type=float, default=0.05)
     sub.add_parser("reindex")
     sub.add_parser("status")
     return parser
@@ -52,10 +53,22 @@ def kb_main(argv: list[str]) -> int:
         )
         return 0
     try:
-        results = search(store, embedder, args.query, client=args.client, kind=args.kind, limit=args.limit)
+        results = search(
+            store, embedder, args.query, client=args.client, kind=args.kind, limit=args.limit, rel_delta=args.rel_delta
+        )
     except ReindexRequired as exc:
         print(str(exc), file=sys.stderr)
         return 3
+    message_results = search_messages(
+        store, embedder, args.query, client=args.client, limit=args.limit, rel_delta=args.rel_delta
+    )
+    if message_results:
+        print("messages:")
+        for rank, group in enumerate(message_results, 1):
+            print(f"[{rank}] session {group.session_id} ({group.client} / {group.model})")
+            for hit in group.hits:
+                print(f"    [{hit.role}] score={hit.score:.3f} {hit.timestamp}")
+                print(f"    {hit.text[:200]}")
     for rank, group in enumerate(results, 1):
         print(
             f"[{rank}] {group.client} / {group.model} (first seen {group.first_seen}, sessions {group.session_count})"
@@ -63,12 +76,4 @@ def kb_main(argv: list[str]) -> int:
         for hit in group.hits:
             print(f"    {hit.kind} {hit.title} score={hit.score:.3f}")
             print(f"    {hit.text[:200]}")
-    message_results = search_messages(store, embedder, args.query, client=args.client, limit=args.limit)
-    if message_results:
-        print("messages:")
-        for rank, group in enumerate(message_results, 1):
-            print(f"[{rank}] session {group.session_id} ({group.client} / {group.model})")
-            for hit in group.hits:
-                print(f"    score={hit.score:.3f} {hit.timestamp}")
-                print(f"    {hit.text[:200]}")
     return 0

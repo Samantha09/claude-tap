@@ -47,6 +47,7 @@ def kb_search(
     kind: Literal["tool", "prompt_section"] | None = None,
     limit: int = 10,
     min_score: float = 0.0,
+    rel_delta: float = 0.05,
 ) -> dict[str, Any]:
     """Search the local prompt knowledge base (prompts, tool definitions, user messages).
 
@@ -56,9 +57,11 @@ def kb_search(
         kind: Optional chunk-kind filter for the chunks section.
         limit: Max groups per section.
         min_score: Minimum cosine score (0-1) for a hit to be included.
+        rel_delta: Relative score floor; hits below top_score - rel_delta are dropped. 1.0 disables.
 
     Returns:
-        {"chunks": [...], "messages": [...]} grouped by snapshot / session.
+        {"messages": [...], "chunks": [...]} grouped by session / snapshot.
+        The messages section is the primary evidence and comes first.
         On embedder/reindex failure: {"error": str, "chunks": [], "messages": []}.
     """
     try:
@@ -70,8 +73,12 @@ def kb_search(
     except sqlite3.OperationalError:
         pass  # dashboard's lazy indexer holds the write lock; search the stale index
     try:
-        chunk_groups = search(store, embedder, query, client=client, kind=kind, limit=limit, min_score=min_score)
-        message_groups = search_messages(store, embedder, query, client=client, limit=limit, min_score=min_score)
+        chunk_groups = search(
+            store, embedder, query, client=client, kind=kind, limit=limit, min_score=min_score, rel_delta=rel_delta
+        )
+        message_groups = search_messages(
+            store, embedder, query, client=client, limit=limit, min_score=min_score, rel_delta=rel_delta
+        )
     except ReindexRequired as exc:
         return {"error": str(exc), "chunks": [], "messages": []}
     except EmbedderUnavailable as exc:
@@ -79,6 +86,15 @@ def kb_search(
     except Exception as exc:  # noqa: BLE001 - never throw a stack at the MCP client
         return {"error": f"kb_search failed: {exc}", "chunks": [], "messages": []}
     return {
+        "messages": [
+            {
+                "session_id": g.session_id,
+                "client": g.client,
+                "model": g.model,
+                "hits": [{"text": h.text, "timestamp": h.timestamp, "score": h.score, "role": h.role} for h in g.hits],
+            }
+            for g in message_groups
+        ],
         "chunks": [
             {
                 "client": g.client,
@@ -89,15 +105,6 @@ def kb_search(
                 "hits": [{"kind": h.kind, "title": h.title, "text": h.text, "score": h.score} for h in g.hits],
             }
             for g in chunk_groups
-        ],
-        "messages": [
-            {
-                "session_id": g.session_id,
-                "client": g.client,
-                "model": g.model,
-                "hits": [{"text": h.text, "timestamp": h.timestamp, "score": h.score} for h in g.hits],
-            }
-            for g in message_groups
         ],
     }
 

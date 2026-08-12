@@ -71,6 +71,44 @@ def test_kb_search_prints_message_section(trace_db, monkeypatch, capsys):
     assert "sess-1" in out
 
 
+def test_cli_search_prints_messages_first_with_roles(trace_db, monkeypatch, capsys):
+    """messages 小节先于快照组打印，消息行带 [user]/[assistant] 前缀。"""
+    store = KbStore.default()
+    embedder = FakeEmbedder()
+    ensure_embedder_meta(store, embedder)
+    snap_id, _ = store.upsert_snapshot(
+        content_hash="h",
+        client="codex",
+        provider="openai",
+        model="gpt-5",
+        system_prompt="s",
+        developer_prompt="",
+        tools_json="[]",
+        seen_at="2026-08-01T00:00:00Z",
+    )
+    store.replace_chunks(snap_id, [("tool", "shell", "sandbox shell command runner")])
+    store.upsert_message(
+        session_id="sess-1",
+        record_index=0,
+        message_index=0,
+        client="claude",
+        model="k3",
+        timestamp="2026-08-10T01:00:00Z",
+        content_hash="h1",
+        text="how to fix the race condition",
+        seen_at="t",
+    )
+    index_pending(store, embedder)
+    monkeypatch.setattr("claude_tap.prompt_kb.cli.create_embedder", lambda config: embedder)
+    rc = kb_main(["search", "race condition shell"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "messages:" in out
+    assert "[1]" in out
+    assert out.index("messages:") < out.index("[1]")
+    assert "[user]" in out
+
+
 def test_kb_search_embedder_unavailable(trace_db, monkeypatch, capsys):
     from claude_tap.prompt_kb.embed import EmbedderUnavailable
 

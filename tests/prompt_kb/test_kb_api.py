@@ -119,6 +119,7 @@ async def test_kb_search_includes_messages(trace_db, seeded_kb_messages, tmp_pat
         assert "messages" in payload
         assert payload["messages"][0]["session_id"] == "sess-abc"
         assert payload["messages"][0]["hits"][0]["text"]
+        assert all("role" in hit for g in payload["messages"] for hit in g["hits"])
         assert payload["results"] == []  # prompt partition still present
     finally:
         await server.stop()

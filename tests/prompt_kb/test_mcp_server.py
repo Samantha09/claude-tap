@@ -73,6 +73,32 @@ def test_kb_search_returns_messages_section(ctx):
     assert hit["timestamp"] and hit["score"] > 0
 
 
+def test_kb_search_messages_first_and_roles(monkeypatch):
+    """kb_search 响应 messages 分区在前，hit 带 role，rel_delta 透传。"""
+    calls = {}
+
+    class FakeGroup:
+        session_id = "s1"
+        client = "claude"
+        model = "k3"
+        hits = [type("H", (), {"text": "t", "timestamp": "ts", "score": 0.9, "role": "assistant"})()]
+
+    def fake_search_messages(store, embedder, query, **kw):
+        calls.update(kw)
+        return [FakeGroup()]
+
+    monkeypatch.setattr("claude_tap.prompt_kb.mcp_server.search", lambda *a, **kw: [])
+    monkeypatch.setattr("claude_tap.prompt_kb.mcp_server.search_messages", fake_search_messages)
+    monkeypatch.setattr("claude_tap.prompt_kb.mcp_server.index_pending", lambda *a, **kw: None)
+    monkeypatch.setattr("claude_tap.prompt_kb.mcp_server._get_ctx", lambda: (object(), object()))
+    from claude_tap.prompt_kb.mcp_server import kb_search
+
+    result = kb_search("q", rel_delta=0.1)
+    assert list(result.keys())[0] == "messages"
+    assert result["messages"][0]["hits"][0]["role"] == "assistant"
+    assert calls["rel_delta"] == 0.1
+
+
 def test_kb_search_indexes_pending_first(ctx):
     """New traces must be searchable without an explicit reindex."""
     store, _ = ctx

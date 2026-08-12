@@ -633,6 +633,18 @@ class LiveViewerServer:
             )
         return web.json_response(
             {
+                "messages": [
+                    {
+                        "session_id": group.session_id,
+                        "client": group.client,
+                        "model": group.model,
+                        "hits": [
+                            {"text": h.text, "timestamp": h.timestamp, "score": h.score, "role": h.role}
+                            for h in group.hits
+                        ],
+                    }
+                    for group in messages
+                ],
                 "results": [
                     {
                         "snapshot_id": group.snapshot_id,
@@ -646,15 +658,6 @@ class LiveViewerServer:
                         ],
                     }
                     for group in results
-                ],
-                "messages": [
-                    {
-                        "session_id": group.session_id,
-                        "client": group.client,
-                        "model": group.model,
-                        "hits": [{"text": h.text, "timestamp": h.timestamp, "score": h.score} for h in group.hits],
-                    }
-                    for group in messages
                 ],
             }
         )
