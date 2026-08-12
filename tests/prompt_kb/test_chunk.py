@@ -87,3 +87,22 @@ def test_boilerplate_sections_skipped():
     assert chunks and all(c.title != "Environment" for c in chunks)
     assert any(c.title == "Style Guide" for c in chunks)
     assert "environment" in BOILERPLATE_TITLES
+
+
+def test_short_boilerplate_section_merged_into_neighbor_also_dropped():
+    env = "# Environment\nWorking directory: /x\nPlatform: darwin"  # < MIN_SECTION_CHARS
+    style = "# Style Guide\n" + ("write elegant prose with care. " * 20)
+    snapshot = SimpleNamespace(system_prompt=f"{env}\n\n{style}", developer_prompt="", tools=[])
+    chunks = chunk_snapshot(snapshot)
+    assert chunks
+    assert all("Working directory" not in c.text for c in chunks)
+    assert any(c.title == "Style Guide" for c in chunks)
+
+
+def test_split_long_no_empty_tail_piece():
+    from claude_tap.prompt_kb.chunk import MAX_SECTION_CHARS, _split_long
+
+    body = "x" * (MAX_SECTION_CHARS * 2)
+    pieces = _split_long("t", body)
+    assert all(piece for _title, piece in pieces)
+    assert len(pieces) == 2

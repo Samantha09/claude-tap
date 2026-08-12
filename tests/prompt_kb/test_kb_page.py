@@ -55,7 +55,7 @@ def test_kb_new_i18n_entries_bilingual():
     ):
         assert f"{key}:" in html, key
     # zh-CN
-    for text in ("最低分数", "展开全文", "收起", "最新版", "个历史快照", "找到 {n} 组结果", "知识库只收录"):
+    for text in ("最低分数", "展开全文", "收起", "最新版", "个历史快照", "找到 {n} 组结果", "试试换个关键词"):
         assert text in html, text
     # en
     for text in ("Min score", "Show full text", "Collapse", "Latest", "history snapshot", "result group"):

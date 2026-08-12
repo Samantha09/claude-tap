@@ -37,7 +37,9 @@ def chunk_snapshot(snapshot: PromptSnapshot) -> list[Chunk]:
 
 
 def _split_prompt(text: str) -> list[Chunk]:
-    sections = _heading_sections(text.strip())
+    # Drop boilerplate-titled sections before merging, so a short boilerplate
+    # block can't be folded into a neighbor and escape the title check.
+    sections = [(t, b) for t, b in _heading_sections(text.strip()) if t.strip().lower() not in BOILERPLATE_TITLES]
     merged = _merge_small(sections)
     chunks: list[Chunk] = []
     for title, body in merged:
@@ -110,7 +112,8 @@ def _split_long(title: str, body: str) -> list[tuple[str, str]]:
         while len(piece) > MAX_SECTION_CHARS:
             result.append((piece_title, piece[:MAX_SECTION_CHARS]))
             piece = piece[MAX_SECTION_CHARS:]
-        result.append((piece_title, piece))
+        if piece:
+            result.append((piece_title, piece))
     return result
 
 
