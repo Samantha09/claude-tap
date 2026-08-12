@@ -64,6 +64,20 @@ def test_search_min_score(seeded):
     assert results == []
 
 
+def test_message_hit_carries_role(seeded):
+    store, embedder = seeded
+    store.upsert_message(
+        session_id="s1", record_index=9, message_index=0, client="claude",
+        model="k3", timestamp="2026-08-02T00:00:00Z", content_hash="h9",
+        text="the race condition fix is a strict lock ordering protocol",
+        seen_at="t", role="assistant",
+    )
+    index_pending(store, embedder)
+    results = search_messages(store, embedder, "race condition lock", rel_delta=1.0)
+    roles = {h.role for g in results for h in g.hits}
+    assert "assistant" in roles and "user" in roles
+
+
 def test_reindex_required_on_embedder_mismatch(tmp_path):
     store = KbStore(tmp_path / "kb.sqlite3")
     store.set_meta("embedder_name", "other")

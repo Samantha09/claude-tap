@@ -83,3 +83,50 @@ def test_search_respects_min_score(trace_db):
     assert total > 0
     assert kept < total
     assert all(h.score >= 0.999 for g in filtered for h in g.hits)
+
+
+def _seed_overlap(store: KbStore) -> None:
+    """三个快照：A 与 query 全量重叠（top），B/C 部分重叠（长尾）。"""
+    for client, model, seen, chunks in [
+        ("codex", "gpt-5", "2026-08-01T00:00:00Z",
+         [("prompt_section", "Guide", "alpha beta gamma delta epsilon zeta runs fast")]),
+        ("claude-code", "claude", "2026-08-02T00:00:00Z",
+         [("prompt_section", "Notes", "alpha only shares one token here")]),
+        ("claude-code", "claude", "2026-08-03T00:00:00Z",
+         [("prompt_section", "Style", "write elegant prose")]),
+    ]:
+        sid, _ = store.upsert_snapshot(
+            content_hash=f"h-{client}-{seen}", client=client, provider="p", model=model,
+            system_prompt="s", developer_prompt="", tools_json="[]", seen_at=seen,
+        )
+        store.replace_chunks(sid, chunks)
+
+
+def test_rel_delta_trims_long_tail(trace_db):
+    store = KbStore.default()
+    _seed_overlap(store)
+    embedder = FakeEmbedder()
+    ensure_embedder_meta(store, embedder)
+    index_pending(store, embedder)
+    results = search(store, embedder, "alpha beta gamma delta epsilon zeta")
+    assert len(results) == 1  # top=0.938，0.667/0.510 被 rel_delta=0.05 截断
+    assert results[0].client == "codex"
+    everything = search(store, embedder, "alpha beta gamma delta epsilon zeta", rel_delta=1.0)
+    assert len(everything) == 3
+
+
+def test_identical_chunks_folded_across_snapshots(trace_db):
+    store = KbStore.default()
+    for client, seen in [("codex", "2026-08-01T00:00:00Z"), ("claude-code", "2026-08-02T00:00:00Z")]:
+        sid, _ = store.upsert_snapshot(
+            content_hash=f"h-{client}", client=client, provider="p", model="m",
+            system_prompt="s", developer_prompt="", tools_json="[]", seen_at=seen,
+        )
+        store.replace_chunks(sid, [("tool", "shell", "sandbox shell command runner")])
+    embedder = FakeEmbedder()
+    ensure_embedder_meta(store, embedder)
+    index_pending(store, embedder)
+    results = search(store, embedder, "shell sandbox", rel_delta=1.0)
+    assert len(results) == 1  # 同分平局归最新 last_seen 的快照
+    assert results[0].client == "claude-code"
+    assert results[0].session_count == 2  # 被折叠快照的计数累加
