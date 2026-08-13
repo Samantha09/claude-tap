@@ -27,6 +27,7 @@ def seeded_kb(trace_db, monkeypatch):
     ensure_embedder_meta(store, embedder)
     index_pending(store, embedder)
     monkeypatch.setattr("claude_tap.live.create_embedder", lambda config: embedder)
+    monkeypatch.setattr("claude_tap.live.create_reranker", lambda config: None)
     return embedder
 
 
@@ -44,6 +45,7 @@ async def test_kb_search_route(trace_db, seeded_kb, tmp_path):
         assert status == 200
         assert payload["results"][0]["client"] == "codex"
         assert payload["results"][0]["hits"][0]["title"] == "shell"
+        assert payload["reranked"] is False
     finally:
         await server.stop()
 
@@ -107,6 +109,7 @@ def seeded_kb_messages(trace_db, monkeypatch):
     )
     index_pending(store, embedder)
     monkeypatch.setattr("claude_tap.live.create_embedder", lambda config: embedder)
+    monkeypatch.setattr("claude_tap.live.create_reranker", lambda config: None)
     return embedder
 
 

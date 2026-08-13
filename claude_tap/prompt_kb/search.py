@@ -1,12 +1,15 @@
-"""Cosine-similarity search over indexed chunks and user messages."""
+"""Hybrid search: vector + FTS keyword channels, RRF-fused, reranked."""
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
 from claude_tap.prompt_kb.embed import Embedder, EmbedderUnavailable
+from claude_tap.prompt_kb.rerank import Reranker
 from claude_tap.prompt_kb.store import KbStore
+from claude_tap.prompt_kb.tokenize import segment
 
 
 class ReindexRequired(Exception):
@@ -46,6 +49,54 @@ class SessionResult:
     client: str
     model: str
     hits: list[MessageHit] = field(default_factory=list)
+
+
+_RRF_K = 60
+_WORD_RE = re.compile(r"[A-Za-z0-9_一-鿿]+")
+
+
+def _match_query(text: str) -> str:
+    """Sanitize raw text into an FTS5 MATCH query (OR of word tokens)."""
+    return " OR ".join(_WORD_RE.findall(text))
+
+
+def _rrf_fuse(rankings: list[list[tuple[int, float]]], limit: int) -> list[int]:
+    """Reciprocal-rank fusion over (rowid, score) rankings → fused rowids, best first."""
+    fused: dict[int, float] = {}
+    for ranking in rankings:
+        for rank, (rowid, _score) in enumerate(ranking, 1):
+            fused[rowid] = fused.get(rowid, 0.0) + 1.0 / (_RRF_K + rank)
+    return sorted(fused, key=fused.__getitem__, reverse=True)[:limit]
+
+
+def _fts_channels(store: KbStore, entity: str, query: str, recall: int) -> list[list[tuple[int, float]]]:
+    """Keyword rankings: trigram on raw terms, jieba-table on segmented terms."""
+    channels = []
+    tri_match = _match_query(query)
+    if tri_match:
+        channels.append(store.fts_rank(entity, "tri", tri_match, recall))
+    jieba_match = _match_query(segment(query))
+    if jieba_match:
+        channels.append(store.fts_rank(entity, "jieba", jieba_match, recall))
+    return channels
+
+
+def _final_scores(
+    reranker: Reranker | None, query: str, texts: list[str], fallback: list[float]
+) -> tuple[list[float], bool]:
+    """Reranker (sigmoid-calibrated) scores when available, else cosine fallback.
+
+    A reranker that raises at runtime degrades to the fallback: search must
+    never fail because an enhancement failed.
+    """
+    if reranker is None:
+        return fallback, False
+    if not texts:
+        return fallback, True
+    try:
+        return [float(score) for score in reranker.rerank(query, texts)], True
+    except Exception:  # noqa: BLE001 - a broken reranker must not break search
+        return fallback, False
 
 
 def _cosine_scores(matrix, query_vec):
@@ -98,7 +149,16 @@ def search(
     limit: int = 10,
     min_score: float = 0.0,
     rel_delta: float = 0.05,
-) -> list[SnapshotResult]:
+    recall: int = 20,
+    reranker: Reranker | None = None,
+) -> tuple[list[SnapshotResult], bool]:
+    """Hybrid search over chunks; returns (groups, reranked).
+
+    Three channels (vector cosine, trigram FTS, jieba FTS) are RRF-fused into
+    candidates; the reranker rescores them when available. Scores are reranker
+    scores when reranked=True (calibrated, rel_delta ignored), else cosine
+    fallback scores (rel_delta applies as before).
+    """
     _check_embedder_meta(store, embedder)
     rows = store.indexed_chunks()
     if client:
@@ -106,7 +166,7 @@ def search(
     if kind:
         rows = [row for row in rows if row["kind"] == kind]
     if not rows:
-        return []
+        return [], reranker is not None
     try:
         import numpy as np
     except ImportError as exc:
@@ -117,16 +177,49 @@ def search(
     embed_query = getattr(embedder, "embed_query", None) or embedder.embed
     query_vec = np.array(embed_query([query])[0], dtype=np.float32)
     scores = _cosine_scores(matrix, query_vec)
-
-    scored = [(row, float(score)) for row, score in zip(rows, scores) if score > min_score]
-    if not scored:
-        return []
-    top = max(score for _, score in scored)
-    # Relative floor: keep hits close to the best score (absolute scores are
-    # not calibrated; rel_delta=1.0 disables the floor entirely).
-    kept = [(row, score) for row, score in scored if score > top - rel_delta or score == top]
+    cosine_by_id = {int(row["id"]): float(score) for row, score in zip(rows, scores)}
+    by_id = {int(row["id"]): row for row in rows}
+    # Vector channel: positive-overlap rows only, so zero-cosine tail rows
+    # cannot ride the fusion into the candidate pool.
+    vector_ranking = sorted(
+        ((row_id, score) for row_id, score in cosine_by_id.items() if score > 0.0),
+        key=lambda item: item[1],
+        reverse=True,
+    )[:recall]
+    candidate_ids = [
+        cid
+        for cid in _rrf_fuse([vector_ranking, *_fts_channels(store, "chunks", query, recall)], recall)
+        if cid in by_id
+    ]
+    if not candidate_ids:
+        return [], reranker is not None
+    # Cross-snapshot dedup before reranking (no rerank compute wasted on dups);
+    # cosine breaks ties exactly as it did for the pre-hybrid pipeline.
+    deduped = _dedup_across_snapshots([(by_id[cid], cosine_by_id[cid]) for cid in candidate_ids])
+    final, reranked = _final_scores(
+        reranker,
+        query,
+        [row["text"] for row, _score, _bonus in deduped],
+        [cosine_by_id[int(row["id"])] for row, _score, _bonus in deduped],
+    )
+    if reranked:
+        kept = [
+            (row, score, bonus)
+            for (row, _cos, bonus), score in zip(deduped, final)
+            if score > min_score
+        ]
+    else:
+        kept = [
+            (row, score, bonus)
+            for (row, _cos, bonus), score in zip(deduped, final)
+            if score >= min_score
+        ]
+        if kept:
+            top = max(score for _, score, _ in kept)
+            # Relative floor for uncalibrated cosine scores (rel_delta=1.0 disables).
+            kept = [(row, score, bonus) for row, score, bonus in kept if score > top - rel_delta or score == top]
     groups: dict[int, SnapshotResult] = {}
-    for row, score, bonus_sessions in _dedup_across_snapshots(kept):
+    for row, score, bonus_sessions in kept:
         group = groups.setdefault(
             row["snapshot_id"],
             SnapshotResult(
@@ -149,7 +242,7 @@ def search(
     )
     for group in ordered:
         group.hits = sorted(group.hits, key=lambda h: h.score, reverse=True)[:3]
-    return ordered[:limit]
+    return ordered[:limit], reranked
 
 
 def search_messages(
@@ -161,14 +254,16 @@ def search_messages(
     limit: int = 10,
     min_score: float = 0.0,
     rel_delta: float = 0.05,
-) -> list[SessionResult]:
-    """Cosine-similarity search over indexed user messages, grouped by session."""
+    recall: int = 20,
+    reranker: Reranker | None = None,
+) -> tuple[list[SessionResult], bool]:
+    """Hybrid search over indexed chat messages (user + assistant), grouped by session."""
     _check_embedder_meta(store, embedder)
     rows = store.indexed_messages()
     if client:
         rows = [row for row in rows if row["client"] == client]
     if not rows:
-        return []
+        return [], reranker is not None
     try:
         import numpy as np
     except ImportError as exc:
@@ -179,13 +274,34 @@ def search_messages(
     embed_query = getattr(embedder, "embed_query", None) or embedder.embed
     query_vec = np.array(embed_query([query])[0], dtype=np.float32)
     scores = _cosine_scores(matrix, query_vec)
-
-    scored = [(row, float(score)) for row, score in zip(rows, scores) if score > min_score]
-    if not scored:
-        return []
-    top = max(score for _, score in scored)
-    # No cross-snapshot dedup here: messages are already unique by content_hash.
-    kept = [(row, score) for row, score in scored if score > top - rel_delta or score == top]
+    cosine_by_id = {int(row["id"]): float(score) for row, score in zip(rows, scores)}
+    by_id = {int(row["id"]): row for row in rows}
+    vector_ranking = sorted(
+        ((row_id, score) for row_id, score in cosine_by_id.items() if score > 0.0),
+        key=lambda item: item[1],
+        reverse=True,
+    )[:recall]
+    candidate_ids = [
+        cid
+        for cid in _rrf_fuse([vector_ranking, *_fts_channels(store, "messages", query, recall)], recall)
+        if cid in by_id
+    ]
+    if not candidate_ids:
+        return [], reranker is not None
+    candidates = [by_id[cid] for cid in candidate_ids]
+    final, reranked = _final_scores(
+        reranker,
+        query,
+        [row["text"] for row in candidates],
+        [cosine_by_id[int(row["id"])] for row in candidates],
+    )
+    if reranked:
+        kept = [(row, score) for row, score in zip(candidates, final) if score > min_score]
+    else:
+        kept = [(row, score) for row, score in zip(candidates, final) if score >= min_score]
+        if kept:
+            top = max(score for _, score in kept)
+            kept = [(row, score) for row, score in kept if score > top - rel_delta or score == top]
     groups: dict[str, SessionResult] = {}
     for row, score in kept:
         group = groups.setdefault(
@@ -206,4 +322,4 @@ def search_messages(
     )
     for group in ordered:
         group.hits = sorted(group.hits, key=lambda h: h.score, reverse=True)[:3]
-    return ordered[:limit]
+    return ordered[:limit], reranked

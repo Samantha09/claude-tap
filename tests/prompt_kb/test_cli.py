@@ -24,6 +24,7 @@ def seeded_kb(trace_db, monkeypatch):
     ensure_embedder_meta(store, embedder)
     index_pending(store, embedder)
     monkeypatch.setattr("claude_tap.prompt_kb.cli.create_embedder", lambda config: embedder)
+    monkeypatch.setattr("claude_tap.prompt_kb.cli.create_reranker", lambda config: None)
     return store
 
 
@@ -31,6 +32,11 @@ def test_kb_search_prints_grouped_results(seeded_kb, capsys):
     assert kb_main(["search", "shell sandbox"]) == 0
     out = capsys.readouterr().out
     assert "codex" in out and "gpt-5" in out and "shell" in out
+
+
+def test_kb_search_prints_reranked_line(seeded_kb, capsys):
+    assert kb_main(["search", "shell sandbox"]) == 0
+    assert "reranked: no" in capsys.readouterr().out
 
 
 def test_kb_status_prints_counts(seeded_kb, capsys):

@@ -9,11 +9,13 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from claude_tap.prompt_kb.embed import EmbedderUnavailable, create_embedder, load_config
 from claude_tap.prompt_kb.index import index_pending
+from claude_tap.prompt_kb.rerank import RerankerUnavailable, create_reranker
 from claude_tap.prompt_kb.search import ReindexRequired, search, search_messages
 from claude_tap.prompt_kb.store import KbStore
 
 if TYPE_CHECKING:
     from claude_tap.prompt_kb.embed import Embedder
+    from claude_tap.prompt_kb.rerank import Reranker
 
 try:
     from mcp.server.fastmcp import FastMCP
@@ -22,22 +24,28 @@ except ImportError:
 
 INSTALL_HINT = "MCP support is not installed; run: pip install 'claude-tap[mcp,rag]'"
 
-_ctx: tuple[KbStore, Embedder] | None = None
+_ctx: tuple[KbStore, Embedder, Reranker | None] | None = None
 _ctx_lock = threading.Lock()
 
 
-def _get_ctx() -> tuple[KbStore, Embedder]:
-    """Lazily open the KB store and build the embedder.
+def _get_ctx() -> tuple[KbStore, Embedder, "Reranker | None"]:
+    """Lazily open the KB store, build the embedder, and try the reranker.
 
     The embedding model loads on first tool call, not at server startup.
     FastMCP runs sync tools in a threadpool, so guard the one-time build
     with a lock (double-checked) to avoid loading the model twice.
+    The reranker is best-effort: when it cannot load, search falls back to
+    the fused ranking and reports reranked=false.
     """
     global _ctx
     if _ctx is None:
         with _ctx_lock:
             if _ctx is None:
-                _ctx = (KbStore.default(), create_embedder(load_config()))
+                try:
+                    reranker = create_reranker(load_config())
+                except RerankerUnavailable:
+                    reranker = None
+                _ctx = (KbStore.default(), create_embedder(load_config()), reranker)
     return _ctx
 
 
@@ -60,31 +68,36 @@ def kb_search(
         rel_delta: Relative score floor; hits below top_score - rel_delta are dropped. 1.0 disables.
 
     Returns:
-        {"messages": [...], "chunks": [...]} grouped by session / snapshot.
+        {"messages": [...], "chunks": [...], "reranked": bool} grouped by session / snapshot.
         The messages section is the primary evidence and comes first.
-        On embedder/reindex failure: {"error": str, "chunks": [], "messages": []}.
+        Retrieval is hybrid (vector + keyword FTS channels, RRF-fused); when the local
+        reranker model is unavailable, reranked=false and scores are fused-ranking fallbacks.
+        rel_delta only applies to the fallback path.
+        On embedder/reindex failure: {"error": str, "chunks": [], "messages": [], "reranked": false}.
     """
     try:
-        store, embedder = _get_ctx()
+        store, embedder, reranker = _get_ctx()
     except EmbedderUnavailable as exc:
-        return {"error": f"embedder unavailable: {exc}", "chunks": [], "messages": []}
+        return {"error": f"embedder unavailable: {exc}", "chunks": [], "messages": [], "reranked": False}
     try:
         index_pending(store, embedder)
     except sqlite3.OperationalError:
         pass  # dashboard's lazy indexer holds the write lock; search the stale index
     try:
-        chunk_groups = search(
-            store, embedder, query, client=client, kind=kind, limit=limit, min_score=min_score, rel_delta=rel_delta
+        chunk_groups, chunks_reranked = search(
+            store, embedder, query, client=client, kind=kind, limit=limit, min_score=min_score,
+            rel_delta=rel_delta, reranker=reranker,
         )
-        message_groups = search_messages(
-            store, embedder, query, client=client, limit=limit, min_score=min_score, rel_delta=rel_delta
+        message_groups, messages_reranked = search_messages(
+            store, embedder, query, client=client, limit=limit, min_score=min_score,
+            rel_delta=rel_delta, reranker=reranker,
         )
     except ReindexRequired as exc:
-        return {"error": str(exc), "chunks": [], "messages": []}
+        return {"error": str(exc), "chunks": [], "messages": [], "reranked": False}
     except EmbedderUnavailable as exc:
-        return {"error": f"embedder unavailable: {exc}", "chunks": [], "messages": []}
+        return {"error": f"embedder unavailable: {exc}", "chunks": [], "messages": [], "reranked": False}
     except Exception as exc:  # noqa: BLE001 - never throw a stack at the MCP client
-        return {"error": f"kb_search failed: {exc}", "chunks": [], "messages": []}
+        return {"error": f"kb_search failed: {exc}", "chunks": [], "messages": [], "reranked": False}
     return {
         "messages": [
             {
@@ -106,6 +119,7 @@ def kb_search(
             }
             for g in chunk_groups
         ],
+        "reranked": chunks_reranked and messages_reranked,
     }
 
 

@@ -30,6 +30,7 @@ from claude_tap.dashboard import (
 from claude_tap.history import delete_trace_history, migrate_legacy_traces
 from claude_tap.prompt_kb.embed import EmbedderUnavailable, create_embedder, load_config
 from claude_tap.prompt_kb.index import ensure_embedder_meta, rebuild_index, run_index_loop
+from claude_tap.prompt_kb.rerank import RerankerUnavailable, create_reranker
 from claude_tap.prompt_kb.search import ReindexRequired
 from claude_tap.prompt_kb.search import search as kb_search
 from claude_tap.prompt_kb.search import search_messages as kb_search_messages
@@ -586,6 +587,15 @@ class LiveViewerServer:
             self._kb_embedder_instance = embedder
         return self._kb_embedder_instance
 
+    def _kb_reranker(self):
+        """Process-wide lazy reranker; None when off or unavailable (degraded)."""
+        if getattr(self, "_kb_reranker_instance", "unset") == "unset":
+            try:
+                self._kb_reranker_instance = create_reranker(load_config())
+            except RerankerUnavailable:
+                self._kb_reranker_instance = None
+        return self._kb_reranker_instance
+
     @staticmethod
     def _kb_unavailable_response(exc: Exception) -> web.Response:
         return web.json_response(
@@ -606,7 +616,11 @@ class LiveViewerServer:
         except ValueError:
             min_score = 0.0
         try:
-            results = kb_search(
+            rel_delta = float(request.query.get("rel_delta", "") or 0.05)
+        except ValueError:
+            rel_delta = 0.05
+        try:
+            results, chunks_reranked = kb_search(
                 KbStore.default(),
                 embedder,
                 query,
@@ -614,14 +628,18 @@ class LiveViewerServer:
                 kind=request.query.get("kind") or None,
                 limit=int(request.query.get("limit", "10")),
                 min_score=min_score,
+                rel_delta=rel_delta,
+                reranker=self._kb_reranker(),
             )
-            messages = kb_search_messages(
+            messages, messages_reranked = kb_search_messages(
                 KbStore.default(),
                 embedder,
                 query,
                 client=request.query.get("client") or None,
                 limit=int(request.query.get("limit", "10")),
                 min_score=min_score,
+                rel_delta=rel_delta,
+                reranker=self._kb_reranker(),
             )
         except EmbedderUnavailable as exc:
             # search() may raise here too (api embedder without numpy).
@@ -633,6 +651,7 @@ class LiveViewerServer:
             )
         return web.json_response(
             {
+                "reranked": chunks_reranked and messages_reranked,
                 "messages": [
                     {
                         "session_id": group.session_id,

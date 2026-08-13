@@ -7,6 +7,7 @@ import sys
 
 from claude_tap.prompt_kb.embed import EmbedderUnavailable, create_embedder, load_config
 from claude_tap.prompt_kb.index import ensure_embedder_meta, rebuild_index
+from claude_tap.prompt_kb.rerank import RerankerUnavailable, create_reranker
 from claude_tap.prompt_kb.search import ReindexRequired, search, search_messages
 from claude_tap.prompt_kb.store import KbStore
 
@@ -33,6 +34,13 @@ def _embedder_or_exit():
         return None
 
 
+def _reranker_or_none():
+    try:
+        return create_reranker(load_config())
+    except RerankerUnavailable:
+        return None
+
+
 def kb_main(argv: list[str]) -> int:
     args = _build_parser().parse_args(argv)
     store = KbStore.default()
@@ -52,16 +60,20 @@ def kb_main(argv: list[str]) -> int:
             f" messages_indexed={result['messages_indexed']} messages_failed={result['messages_failed']}"
         )
         return 0
+    reranker = _reranker_or_none()
     try:
-        results = search(
-            store, embedder, args.query, client=args.client, kind=args.kind, limit=args.limit, rel_delta=args.rel_delta
+        results, chunks_reranked = search(
+            store, embedder, args.query, client=args.client, kind=args.kind, limit=args.limit,
+            rel_delta=args.rel_delta, reranker=reranker,
         )
     except ReindexRequired as exc:
         print(str(exc), file=sys.stderr)
         return 3
-    message_results = search_messages(
-        store, embedder, args.query, client=args.client, limit=args.limit, rel_delta=args.rel_delta
+    message_results, messages_reranked = search_messages(
+        store, embedder, args.query, client=args.client, limit=args.limit,
+        rel_delta=args.rel_delta, reranker=reranker,
     )
+    print(f"reranked: {'yes' if chunks_reranked and messages_reranked else 'no'}")
     if message_results:
         print("messages:")
         for rank, group in enumerate(message_results, 1):

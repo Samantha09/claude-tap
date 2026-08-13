@@ -20,7 +20,7 @@ def ctx(tmp_path, monkeypatch):
     store = KbStore(tmp_path / "kb.sqlite3")
     embedder = FakeEmbedder()
     ensure_embedder_meta(store, embedder)
-    monkeypatch.setattr(mcp_server, "_get_ctx", lambda: (store, embedder))
+    monkeypatch.setattr(mcp_server, "_get_ctx", lambda: (store, embedder, None))
     monkeypatch.setattr(mcp_server.KbStore, "default", classmethod(lambda cls: store))
     return store, embedder
 
@@ -60,7 +60,7 @@ def test_kb_search_returns_chunks_section(ctx):
     hit = result["chunks"][0]["hits"][0]
     assert hit["kind"] == "tool" and hit["title"] == "shell"
     assert hit["score"] > 0.5
-    assert set(result) == {"chunks", "messages"}
+    assert set(result) == {"chunks", "messages", "reranked"}
 
 
 def test_kb_search_returns_messages_section(ctx):
@@ -85,12 +85,12 @@ def test_kb_search_messages_first_and_roles(monkeypatch):
 
     def fake_search_messages(store, embedder, query, **kw):
         calls.update(kw)
-        return [FakeGroup()]
+        return [FakeGroup()], False
 
-    monkeypatch.setattr("claude_tap.prompt_kb.mcp_server.search", lambda *a, **kw: [])
+    monkeypatch.setattr("claude_tap.prompt_kb.mcp_server.search", lambda *a, **kw: ([], False))
     monkeypatch.setattr("claude_tap.prompt_kb.mcp_server.search_messages", fake_search_messages)
     monkeypatch.setattr("claude_tap.prompt_kb.mcp_server.index_pending", lambda *a, **kw: None)
-    monkeypatch.setattr("claude_tap.prompt_kb.mcp_server._get_ctx", lambda: (object(), object()))
+    monkeypatch.setattr("claude_tap.prompt_kb.mcp_server._get_ctx", lambda: (object(), object(), None))
     from claude_tap.prompt_kb.mcp_server import kb_search
 
     result = kb_search("q", rel_delta=0.1)
@@ -118,6 +118,19 @@ def test_kb_search_indexes_pending_first(ctx):
     result = mcp_server.kb_search("deadlock pod")
     texts = [h["text"] for g in result["messages"] for h in g["hits"]]
     assert any("deadlock" in t for t in texts)
+
+
+def test_kb_search_reranked_flags(ctx, monkeypatch):
+    store, _ = ctx
+    _seed(store)
+    result = mcp_server.kb_search("shell sandbox")
+    assert result["reranked"] is False  # ctx fixture has reranker=None
+
+    from tests.prompt_kb.fake_reranker import FakeReranker
+
+    monkeypatch.setattr(mcp_server, "_get_ctx", lambda: (store, FakeEmbedder(), FakeReranker()))
+    result = mcp_server.kb_search("shell sandbox")
+    assert result["reranked"] is True
 
 
 def test_kb_status(ctx):
@@ -181,7 +194,7 @@ def test_kb_search_reindex_required(ctx, monkeypatch):
     _seed(store)
     other = FakeEmbedder()
     other.name = "other"  # instance attribute shadows the class attribute
-    monkeypatch.setattr(mcp_server, "_get_ctx", lambda: (store, other))
+    monkeypatch.setattr(mcp_server, "_get_ctx", lambda: (store, other, None))
     result = mcp_server.kb_search("shell sandbox")
     assert "reindex" in result["error"]
     assert result["chunks"] == [] and result["messages"] == []

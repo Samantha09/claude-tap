@@ -6,6 +6,7 @@ from claude_tap.prompt_kb.index import ensure_embedder_meta, index_pending
 from claude_tap.prompt_kb.search import ReindexRequired, search_messages
 from claude_tap.prompt_kb.store import KbStore
 from tests.prompt_kb.fake_embedder import FakeEmbedder
+from tests.prompt_kb.fake_reranker import FakeReranker
 
 
 @pytest.fixture()
@@ -37,7 +38,7 @@ def seeded(tmp_path):
 
 def test_search_groups_by_session(seeded):
     store, embedder = seeded
-    results = search_messages(store, embedder, "race condition lock")
+    results, _ = search_messages(store, embedder, "race condition lock")
     assert results
     top = results[0]
     assert top.session_id == "s1"
@@ -52,15 +53,15 @@ def test_search_client_filter(seeded):
     # "recipe" hashes to bucket 1; no s1 token lands in bucket 1, so the
     # claude messages have zero overlap with the query. ("tomato"/"soup"
     # collide with s1 tokens in buckets 14/0 and would leak through.)
-    results = search_messages(store, embedder, "recipe", client="codex")
+    results, _ = search_messages(store, embedder, "recipe", client="codex")
     assert [r.session_id for r in results] == ["s2"]
-    results = search_messages(store, embedder, "recipe", client="claude")
+    results, _ = search_messages(store, embedder, "recipe", client="claude")
     assert results == []
 
 
 def test_search_min_score(seeded):
     store, embedder = seeded
-    results = search_messages(store, embedder, "race condition", min_score=0.99)
+    results, _ = search_messages(store, embedder, "race condition", min_score=0.99)
     assert results == []
 
 
@@ -73,9 +74,26 @@ def test_message_hit_carries_role(seeded):
         seen_at="t", role="assistant",
     )
     index_pending(store, embedder)
-    results = search_messages(store, embedder, "race condition lock", rel_delta=1.0)
+    results, _ = search_messages(store, embedder, "race condition lock", rel_delta=1.0)
     roles = {h.role for g in results for h in g.hits}
     assert "assistant" in roles and "user" in roles
+
+
+def test_messages_reranked_flag(seeded):
+    store, embedder = seeded
+    # FakeReranker: query tokens {race, condition, lock}; both s1 messages
+    # overlap (2/3 and 1/3), the soup message scores 0.0 and is dropped.
+    results, reranked = search_messages(store, embedder, "race condition lock", reranker=FakeReranker())
+    assert reranked is True
+    assert [g.session_id for g in results] == ["s1"]
+    assert all(h.score > 0 for g in results for h in g.hits)
+
+
+def test_messages_not_reranked_without_reranker(seeded):
+    store, embedder = seeded
+    results, reranked = search_messages(store, embedder, "race condition lock")
+    assert reranked is False
+    assert results
 
 
 def test_reindex_required_on_embedder_mismatch(tmp_path):
