@@ -120,6 +120,16 @@ def test_cli_search_prints_messages_first_with_roles(trace_db, monkeypatch, caps
     assert "[user]" in out
 
 
+def test_kb_rebuild_fts(seeded_kb, capsys):
+    assert kb_main(["rebuild-fts"]) == 0
+    assert "fts_rebuilt=1" in capsys.readouterr().out
+    # Idempotent: second run rebuilds the same single chunk row.
+    assert kb_main(["rebuild-fts"]) == 0
+    assert "fts_rebuilt=1" in capsys.readouterr().out
+    # Keyword search still resolves after the rebuild.
+    assert seeded_kb.fts_rank("chunks", "tri", "sandbox", 10)
+
+
 def test_kb_search_embedder_unavailable(trace_db, monkeypatch, capsys):
     from claude_tap.prompt_kb.embed import EmbedderUnavailable
 

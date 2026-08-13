@@ -22,6 +22,7 @@ def _build_parser() -> argparse.ArgumentParser:
     search_parser.add_argument("--limit", type=int, default=10)
     search_parser.add_argument("--rel-delta", type=float, default=0.05)
     sub.add_parser("reindex")
+    sub.add_parser("rebuild-fts")
     sub.add_parser("status")
     return parser
 
@@ -49,6 +50,9 @@ def kb_main(argv: list[str]) -> int:
         print(" ".join(f"{key}={value}" for key, value in stats.items()))
         print(f"embedder={store.get_meta('embedder_name') or 'none'}")
         print(f"reranker={reranker_status(load_config())}")
+        return 0
+    if args.command == "rebuild-fts":
+        print(f"fts_rebuilt={store.rebuild_fts()}")
         return 0
     embedder = _embedder_or_exit()
     if embedder is None:
