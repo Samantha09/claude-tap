@@ -173,3 +173,51 @@ def test_fts_rank_rejects_unknown_channel(trace_db):
         store.fts_rank("chunks", "bogus", "x", 10)
     with pytest.raises(ValueError):
         store.fts_rank("bogus", "tri", "x", 10)
+
+
+def _build_legacy_db_without_fts(path):
+    """A pre-hybrid-schema DB: main tables with data, no FTS tables, no meta flag."""
+    import sqlite3 as _sq
+
+    conn = _sq.connect(path)
+    conn.execute(
+        "CREATE TABLE kb_chunks (id INTEGER PRIMARY KEY, snapshot_id INTEGER NOT NULL,"
+        " kind TEXT NOT NULL, title TEXT, text TEXT NOT NULL, embedding BLOB,"
+        " index_state TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0)"
+    )
+    conn.execute("INSERT INTO kb_chunks (snapshot_id, kind, title, text) VALUES (1, 'tool', 'shell', 'legacy cron tooling')")
+    conn.execute(
+        "CREATE TABLE kb_messages (id INTEGER PRIMARY KEY, session_id TEXT NOT NULL,"
+        " record_index INTEGER NOT NULL, message_index INTEGER NOT NULL, client TEXT NOT NULL,"
+        " model TEXT NOT NULL, timestamp TEXT NOT NULL, content_hash TEXT NOT NULL, text TEXT NOT NULL,"
+        " last_seen TEXT NOT NULL, embedding BLOB, index_state TEXT NOT NULL DEFAULT 'pending',"
+        " attempts INTEGER NOT NULL DEFAULT 0, role TEXT NOT NULL DEFAULT 'user')"
+    )
+    conn.execute(
+        "INSERT INTO kb_messages (session_id, record_index, message_index, client, model,"
+        " timestamp, content_hash, text, last_seen) VALUES ('s1', 0, 0, 'c', 'm', 't', 'h', 'legacy message text', 't')"
+    )
+    conn.execute("CREATE TABLE kb_meta (key TEXT PRIMARY KEY, value TEXT)")
+    conn.commit()
+    conn.close()
+
+
+def test_fts_backfilled_on_open_for_legacy_db(trace_db, tmp_path):
+    path = tmp_path / "legacy_kb.sqlite3"
+    _build_legacy_db_without_fts(path)
+    store = KbStore(path)  # migration runs on open
+    assert len(store.fts_rank("chunks", "tri", "legacy", 10)) == 1
+    assert len(store.fts_rank("messages", "tri", "legacy", 10)) == 1
+    assert store.get_meta("fts_backfilled") == "1"
+    store2 = KbStore(path)  # second open: no duplicate FTS rows
+    assert len(store2.fts_rank("chunks", "tri", "legacy", 10)) == 1
+
+
+def test_rebuild_fts_clears_and_reindexes(trace_db):
+    store = KbStore.default()
+    snap_id, _ = _upsert(store)
+    store.replace_chunks(snap_id, [("tool", "shell", "rebuild me please")])
+    assert store.rebuild_fts() == 1
+    assert len(store.fts_rank("chunks", "tri", "rebuild", 10)) == 1
+    assert store.rebuild_fts() == 1  # idempotent, no duplicates
+    assert len(store.fts_rank("chunks", "tri", "rebuild", 10)) == 1

@@ -143,6 +143,10 @@ class KbStore:
                 sorted(BOILERPLATE_TITLES),
             )
             conn.execute("INSERT OR REPLACE INTO kb_meta (key, value) VALUES ('boilerplate_purged', '1')")
+        fts_done = conn.execute("SELECT value FROM kb_meta WHERE key='fts_backfilled'").fetchone()
+        if fts_done is None or fts_done["value"] != "1":
+            KbStore._backfill_fts(conn)
+            conn.execute("INSERT OR REPLACE INTO kb_meta (key, value) VALUES ('fts_backfilled', '1')")
 
     @classmethod
     def default(cls) -> "KbStore":
@@ -374,6 +378,29 @@ class KbStore:
         except sqlite3.OperationalError:
             return []
         return [(int(row["rowid"]), -float(row["r"])) for row in rows]
+
+    @staticmethod
+    def _backfill_fts(conn: sqlite3.Connection) -> None:
+        """Full-scan FTS backfill for databases created before hybrid search."""
+        for entity in FTS_ENTITIES:
+            rows = conn.execute(f"SELECT id, text FROM {_FTS_TABLE_BY_ENTITY[entity]}").fetchall()
+            for row in rows:
+                _fts_insert(conn, entity, row["id"], row["text"])
+
+    def rebuild_fts(self) -> int:
+        """Clear and rebuild every FTS table from the main tables. Idempotent;
+        use after installing jieba to upgrade pre-jieba segmented rows."""
+        with self._connect() as conn:
+            total = 0
+            for entity in FTS_ENTITIES:
+                for table in fts_tables(entity):
+                    conn.execute(f"INSERT INTO {table} ({table}) VALUES ('delete-all')")
+                rows = conn.execute(f"SELECT id, text FROM {_FTS_TABLE_BY_ENTITY[entity]}").fetchall()
+                for row in rows:
+                    _fts_insert(conn, entity, row["id"], row["text"])
+                total += len(rows)
+            conn.execute("INSERT OR REPLACE INTO kb_meta (key, value) VALUES ('fts_backfilled', '1')")
+            return total
 
     def reset_message_embeddings(self) -> int:
         with self._connect() as conn:
