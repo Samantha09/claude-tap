@@ -143,6 +143,12 @@ def test_kb_status(ctx):
     assert status["snapshots"] == 1 and status["messages"] == 1
 
 
+def test_kb_status_includes_reranker_state(ctx):
+    result = mcp_server.kb_status()
+    # sentence-transformers is not installed in the test venv: configured on -> unavailable
+    assert result["reranker"] in ("unavailable", "BAAI/bge-reranker-base", "off")
+
+
 def test_kb_search_embedder_unavailable(monkeypatch):
     def _raise():
         raise EmbedderUnavailable("sentence-transformers is not installed")

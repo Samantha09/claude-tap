@@ -7,7 +7,7 @@ import sys
 
 from claude_tap.prompt_kb.embed import EmbedderUnavailable, create_embedder, load_config
 from claude_tap.prompt_kb.index import ensure_embedder_meta, rebuild_index
-from claude_tap.prompt_kb.rerank import RerankerUnavailable, create_reranker
+from claude_tap.prompt_kb.rerank import RerankerUnavailable, create_reranker, reranker_status
 from claude_tap.prompt_kb.search import ReindexRequired, search, search_messages
 from claude_tap.prompt_kb.store import KbStore
 
@@ -48,6 +48,7 @@ def kb_main(argv: list[str]) -> int:
         stats = store.stats()
         print(" ".join(f"{key}={value}" for key, value in stats.items()))
         print(f"embedder={store.get_meta('embedder_name') or 'none'}")
+        print(f"reranker={reranker_status(load_config())}")
         return 0
     embedder = _embedder_or_exit()
     if embedder is None:

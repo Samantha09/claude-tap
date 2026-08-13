@@ -45,6 +45,11 @@ def test_kb_status_prints_counts(seeded_kb, capsys):
     assert "indexed=1" in out
 
 
+def test_kb_status_prints_reranker_line(seeded_kb, capsys):
+    assert kb_main(["status"]) == 0
+    assert "reranker=" in capsys.readouterr().out
+
+
 def test_kb_reindex(seeded_kb, capsys):
     assert kb_main(["reindex"]) == 0
     out = capsys.readouterr().out

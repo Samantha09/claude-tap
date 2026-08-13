@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from claude_tap.prompt_kb.embed import EmbedderUnavailable, create_embedder, load_config
 from claude_tap.prompt_kb.index import index_pending
-from claude_tap.prompt_kb.rerank import RerankerUnavailable, create_reranker
+from claude_tap.prompt_kb.rerank import RerankerUnavailable, create_reranker, reranker_status
 from claude_tap.prompt_kb.search import ReindexRequired, search, search_messages
 from claude_tap.prompt_kb.store import KbStore
 
@@ -127,12 +127,17 @@ def kb_status() -> dict[str, Any]:
     """Report knowledge-base index size and embedder identity.
 
     Returns:
-        store.stats() keys (snapshots/chunks/pending/failed/indexed/messages)
-        plus "embedder" (indexed embedder name, or "none").
+        store.stats() keys (snapshots/chunks/pending/failed/indexed/messages/messages_user/
+        messages_assistant) plus "embedder" (indexed embedder name, or "none") and
+        "reranker" ("off" | "unavailable" | reranker model name).
     """
     try:
         store = KbStore.default()
-        return {**store.stats(), "embedder": store.get_meta("embedder_name") or "none"}
+        return {
+            **store.stats(),
+            "embedder": store.get_meta("embedder_name") or "none",
+            "reranker": reranker_status(load_config()),
+        }
     except sqlite3.OperationalError as exc:
         return {"error": f"kb unavailable: {exc}"}
 
