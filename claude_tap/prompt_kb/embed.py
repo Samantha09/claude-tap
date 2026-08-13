@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Protocol
 
 DEFAULT_LOCAL_MODEL = "intfloat/multilingual-e5-small"
+DEFAULT_RERANKER_MODEL = "BAAI/bge-reranker-base"
 DEFAULT_CONFIG_PATH = Path.home() / ".config" / "claude-tap" / "config.toml"
 
 
@@ -43,6 +44,8 @@ class KbConfig:
     # compress into a narrow band and irrelevant text scores deceptively high.
     query_prefix: str = "query: "
     passage_prefix: str = "passage: "
+    reranker: str = "on"  # "on" | "off"
+    reranker_model: str = DEFAULT_RERANKER_MODEL
 
 
 def load_config(path: Path | None = None) -> KbConfig:
@@ -60,6 +63,8 @@ def load_config(path: Path | None = None) -> KbConfig:
         "api_key_env",
         "query_prefix",
         "passage_prefix",
+        "reranker",
+        "reranker_model",
     ):
         env = os.environ.get(f"CLAUDE_TAP_KB_{key.upper()}")
         if env:
