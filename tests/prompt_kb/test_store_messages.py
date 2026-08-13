@@ -161,3 +161,40 @@ def test_migrate_old_db_adds_role_and_resets_backfill(tmp_path):
     assert "role" in cols
     assert idx_cols == ["content_hash", "client", "role"]
     assert done == 0  # 回填被触发
+
+
+def test_fts_synced_on_message_insert_and_session_delete(trace_db):
+    store = KbStore.default()
+    store.upsert_message(
+        session_id="s1",
+        record_index=0,
+        message_index=0,
+        client="codex",
+        model="gpt-5",
+        timestamp="2026-08-01T00:00:00Z",
+        content_hash="m1",
+        text="how to cancel a scheduled cron job",
+        seen_at="t",
+    )
+    assert len(store.fts_rank("messages", "tri", "cron", 10)) == 1
+    store.delete_messages_for_session("s1")
+    assert store.fts_rank("messages", "tri", "cron", 10) == []
+
+
+def test_fts_not_written_on_dedup_hit(trace_db):
+    store = KbStore.default()
+    kwargs = dict(
+        session_id="s1",
+        record_index=0,
+        message_index=0,
+        client="codex",
+        model="gpt-5",
+        timestamp="2026-08-01T00:00:00Z",
+        content_hash="m1",
+        text="unique phrase about reticulating splines",
+        seen_at="t",
+    )
+    store.upsert_message(**kwargs)
+    store.upsert_message(**{**kwargs, "session_id": "s2", "seen_at": "t2"})  # dedup hit
+    ranked = store.fts_rank("messages", "tri", "reticulating", 10)
+    assert len(ranked) == 1

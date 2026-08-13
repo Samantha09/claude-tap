@@ -11,6 +11,7 @@ import sqlite3
 from pathlib import Path
 
 from claude_tap.prompt_kb.chunk import BOILERPLATE_TITLES
+from claude_tap.prompt_kb.tokenize import segment
 from claude_tap.trace_store import resolve_db_path
 
 SCHEMA = """
@@ -68,7 +69,35 @@ CREATE TABLE IF NOT EXISTS kb_messages (
 CREATE INDEX IF NOT EXISTS idx_kb_messages_state ON kb_messages(index_state);
 CREATE INDEX IF NOT EXISTS idx_kb_messages_session ON kb_messages(session_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_kb_messages_dedup ON kb_messages(content_hash, client, role);
+CREATE VIRTUAL TABLE IF NOT EXISTS kb_fts_chunks_tri USING fts5(text, content='', tokenize='trigram');
+CREATE VIRTUAL TABLE IF NOT EXISTS kb_fts_chunks_jieba USING fts5(text, content='', tokenize='unicode61');
+CREATE VIRTUAL TABLE IF NOT EXISTS kb_fts_messages_tri USING fts5(text, content='', tokenize='trigram');
+CREATE VIRTUAL TABLE IF NOT EXISTS kb_fts_messages_jieba USING fts5(text, content='', tokenize='unicode61');
 """
+
+FTS_ENTITIES = ("chunks", "messages")
+_FTS_TABLE_BY_ENTITY = {"chunks": "kb_chunks", "messages": "kb_messages"}
+
+
+def fts_tables(entity: str) -> tuple[str, str]:
+    """(trigram_table, jieba_table) for an entity ("chunks" | "messages")."""
+    if entity not in FTS_ENTITIES:
+        raise ValueError(f"unknown FTS entity: {entity!r}")
+    return (f"kb_fts_{entity}_tri", f"kb_fts_{entity}_jieba")
+
+
+def _fts_insert(conn: sqlite3.Connection, entity: str, rowid: int, text: str) -> None:
+    tri, jieba = fts_tables(entity)
+    conn.execute(f"INSERT INTO {tri} (rowid, text) VALUES (?, ?)", (rowid, text))
+    conn.execute(f"INSERT INTO {jieba} (rowid, text) VALUES (?, ?)", (rowid, segment(text)))
+
+
+def _fts_delete(conn: sqlite3.Connection, entity: str, rowid: int, text: str) -> None:
+    """Contentless FTS rows are removed via the special 'delete' insert, which
+    needs the exact text that was indexed (segmented for the jieba table)."""
+    tri, jieba = fts_tables(entity)
+    conn.execute(f"INSERT INTO {tri} ({tri}, rowid, text) VALUES ('delete', ?, ?)", (rowid, text))
+    conn.execute(f"INSERT INTO {jieba} ({jieba}, rowid, text) VALUES ('delete', ?, ?)", (rowid, segment(text)))
 
 
 def default_db_path() -> Path:
@@ -161,11 +190,16 @@ class KbStore:
 
     def replace_chunks(self, snapshot_id: int, chunks: list[tuple[str, str, str]]) -> None:
         with self._connect() as conn:
+            old = conn.execute("SELECT id, text FROM kb_chunks WHERE snapshot_id=?", (snapshot_id,)).fetchall()
+            for row in old:
+                _fts_delete(conn, "chunks", row["id"], row["text"])
             conn.execute("DELETE FROM kb_chunks WHERE snapshot_id=?", (snapshot_id,))
-            conn.executemany(
-                "INSERT INTO kb_chunks (snapshot_id, kind, title, text) VALUES (?, ?, ?, ?)",
-                [(snapshot_id, kind, title, text) for kind, title, text in chunks],
-            )
+            for kind, title, text in chunks:
+                cur = conn.execute(
+                    "INSERT INTO kb_chunks (snapshot_id, kind, title, text) VALUES (?, ?, ?, ?)",
+                    (snapshot_id, kind, title, text),
+                )
+                _fts_insert(conn, "chunks", int(cur.lastrowid), text)
 
     def is_source_processed(self, session_id: str) -> bool:
         with self._connect() as conn:
@@ -282,6 +316,7 @@ class KbStore:
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (session_id, record_index, message_index, client, model, timestamp, content_hash, text, seen_at, role),
             )
+            _fts_insert(conn, "messages", int(cur.lastrowid), text)
             return int(cur.lastrowid), True
 
     def pending_messages(self, limit: int) -> list[sqlite3.Row]:
@@ -321,6 +356,25 @@ class KbStore:
                    FROM kb_messages WHERE index_state='indexed'"""
             ).fetchall()
 
+    def fts_rank(self, entity: str, tokenizer: str, match_query: str, limit: int) -> list[tuple[int, float]]:
+        """BM25 ranking over one FTS table: [(rowid, positive score)], best first.
+
+        bm25() is negative (smaller = better); negated here so higher = better.
+        A missing table (pre-migration DB) or a bad MATCH yields an empty channel.
+        """
+        if tokenizer not in ("tri", "jieba"):
+            raise ValueError(f"unknown FTS tokenizer: {tokenizer!r}")
+        table = fts_tables(entity)[0 if tokenizer == "tri" else 1]
+        try:
+            with self._connect() as conn:
+                rows = conn.execute(
+                    f"SELECT rowid, bm25({table}) AS r FROM {table} WHERE {table} MATCH ? ORDER BY r LIMIT ?",
+                    (match_query, limit),
+                ).fetchall()
+        except sqlite3.OperationalError:
+            return []
+        return [(int(row["rowid"]), -float(row["r"])) for row in rows]
+
     def reset_message_embeddings(self) -> int:
         with self._connect() as conn:
             cur = conn.execute("UPDATE kb_messages SET embedding=NULL, index_state='pending', attempts=0")
@@ -328,6 +382,9 @@ class KbStore:
 
     def delete_messages_for_session(self, session_id: str) -> int:
         with self._connect() as conn:
+            rows = conn.execute("SELECT id, text FROM kb_messages WHERE session_id=?", (session_id,)).fetchall()
+            for row in rows:
+                _fts_delete(conn, "messages", row["id"], row["text"])
             cur = conn.execute("DELETE FROM kb_messages WHERE session_id=?", (session_id,))
             return cur.rowcount
 

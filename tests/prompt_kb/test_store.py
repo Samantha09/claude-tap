@@ -133,3 +133,43 @@ def test_boilerplate_chunks_purged_once(tmp_path):
         purged = conn.execute("SELECT value FROM kb_meta WHERE key='boilerplate_purged'").fetchone()[0]
     assert titles == ["Style"]
     assert purged == "1"
+
+
+def test_fts_synced_on_replace_chunks(trace_db):
+    store = KbStore.default()
+    snap_id, _ = _upsert(store)
+    store.replace_chunks(snap_id, [("tool", "shell", "CronDelete cancels scheduled cron jobs")])
+    ranked = store.fts_rank("chunks", "tri", "CronDelete", 10)
+    assert len(ranked) == 1 and ranked[0][0] == 1
+    # jieba table got the segmented copy of the same text.
+    ranked_jieba = store.fts_rank("chunks", "jieba", "CronDelete", 10)
+    assert len(ranked_jieba) == 1 and ranked_jieba[0][0] == 1
+
+
+def test_fts_chinese_word_match_via_jieba_channel(trace_db):
+    store = KbStore.default()
+    snap_id, _ = _upsert(store)
+    store.replace_chunks(snap_id, [("prompt_section", "指南", "取消定时任务的正确方法")])
+    # 2-char Chinese word: trigram cannot match it, the jieba channel can.
+    assert store.fts_rank("chunks", "tri", "定时", 10) == []
+    ranked = store.fts_rank("chunks", "jieba", "定时", 10)
+    assert len(ranked) == 1
+
+
+def test_fts_updated_on_replace_chunks(trace_db):
+    store = KbStore.default()
+    snap_id, _ = _upsert(store)
+    store.replace_chunks(snap_id, [("tool", "shell", "alpha bravo charlie")])
+    store.replace_chunks(snap_id, [("tool", "shell", "delta echo foxtrot")])
+    assert store.fts_rank("chunks", "tri", "alpha", 10) == []
+    assert len(store.fts_rank("chunks", "tri", "delta", 10)) == 1
+
+
+def test_fts_rank_rejects_unknown_channel(trace_db):
+    store = KbStore.default()
+    import pytest
+
+    with pytest.raises(ValueError):
+        store.fts_rank("chunks", "bogus", "x", 10)
+    with pytest.raises(ValueError):
+        store.fts_rank("bogus", "tri", "x", 10)
