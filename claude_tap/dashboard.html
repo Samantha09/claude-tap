@@ -1019,6 +1019,7 @@ pre {
 }
 .kb-results { display: flex; flex-direction: column; gap: 12px; }
 .kb-summary { font-size: 13px; color: var(--text-secondary); }
+.kb-rerank-notice { font-size: 12px; color: #8a6d1d; background: #fdf3d7; border: 1px solid #f0e0a8; border-radius: var(--radius-sm); padding: 6px 10px; margin-bottom: 8px; }
 .kb-empty {
   padding: 32px 16px; text-align: center; color: var(--text-secondary);
   border: 1px dashed var(--border); border-radius: var(--radius-sm); font-size: 13px;
@@ -1259,7 +1260,7 @@ pre {
 
   <section id="kb-view" class="kb-view hidden" aria-label="Prompt knowledge base">
     <div class="kb-controls">
-      <input id="kb-query" type="search" data-i18n-placeholder="kb_search_placeholder" placeholder="搜索 prompt 规则或工具定义…">
+      <input id="kb-query" type="search" data-i18n-placeholder="kb_search_placeholder" placeholder="关键词与语义混合搜索…">
       <select id="kb-kind">
         <option value="" data-i18n="kb_kind_all">全部</option>
         <option value="tool" data-i18n="kb_kind_tool">工具</option>
@@ -1491,7 +1492,7 @@ const DASHBOARD_I18N = {
     ok: "ok",
     empty_session: "This session has no captured API records yet.",
     kb_view: "Prompt KB",
-    kb_search_placeholder: "Search prompt rules or tool definitions…",
+    kb_search_placeholder: "Hybrid keyword + semantic search…",
     kb_kind_all: "All", kb_kind_tool: "Tool", kb_kind_prompt: "Prompt section",
     kb_search_btn: "Search", kb_reindex_btn: "Reindex",
     kb_first_seen: "first seen",
@@ -1511,6 +1512,7 @@ const DASHBOARD_I18N = {
     kb_view_session: "View session →",
     kb_kind_message: "Message",
     kb_role_user: "Question", kb_role_assistant: "Answer", kb_chunks_section: "Prompt snapshots",
+    kb_rerank_degraded: "Reranker unavailable — fused keyword + semantic ranking.",
   },
   "zh-CN": {
     document_title: "claude-tap 会话面板",
@@ -1634,7 +1636,7 @@ const DASHBOARD_I18N = {
     ok: "正常",
     empty_session: "这个会话还没有捕获到 API 记录。",
     kb_view: "Prompt 知识库",
-    kb_search_placeholder: "搜索 prompt 规则或工具定义…",
+    kb_search_placeholder: "关键词与语义混合搜索…",
     kb_kind_all: "全部", kb_kind_tool: "工具", kb_kind_prompt: "Prompt 段落",
     kb_search_btn: "搜索", kb_reindex_btn: "重建索引",
     kb_first_seen: "首次出现",
@@ -1654,6 +1656,7 @@ const DASHBOARD_I18N = {
     kb_view_session: "查看会话 →",
     kb_kind_message: "消息",
     kb_role_user: "提问", kb_role_assistant: "回答", kb_chunks_section: "Prompt 快照",
+    kb_rerank_degraded: "重排不可用——按关键词+语义融合分数排序。",
   }
 };
 
@@ -2516,12 +2519,13 @@ async function kbSearch() {
   if (resp.status === 501 || resp.status === 409) {
     kbLastGroups = [];
     kbLastMessages = [];
+    kbLastReranked = true;
     const container = $("#kb-results");
     container.innerHTML = "";
     container.appendChild(kbEmptyState("⚠️", data.hint || data.error));
     return;
   }
-  renderKbResults(data.results || [], data.messages || []);
+  renderKbResults(data.results || [], data.messages || [], data.reranked !== false);
 }
 
 function kbBestScore(group) {
@@ -2559,6 +2563,7 @@ function kbScoreClass(score) {
 
 let kbLastGroups = null;
 let kbLastMessages = null;
+let kbLastReranked = true;
 
 function kbFilterMessageGroups(groups, minScore) {
   return (groups || [])
@@ -2573,9 +2578,10 @@ function kbHitBadge(hit) {
   return ["prompt", "kb_kind_prompt"];
 }
 
-function renderKbResults(results, messages = []) {
+function renderKbResults(results, messages = [], reranked = true) {
   kbLastGroups = results || [];
   kbLastMessages = messages || [];
+  kbLastReranked = reranked;
   kbRenderFiltered();
 }
 
@@ -2603,6 +2609,12 @@ function kbRenderFiltered() {
       t("kb_filtered_by_score", { n: hiddenHits })
     ));
     return;
+  }
+  if (!kbLastReranked) {
+    const notice = document.createElement("div");
+    notice.className = "kb-rerank-notice";
+    notice.textContent = t("kb_rerank_degraded");
+    container.appendChild(notice);
   }
   if (msgGroups.length) {
     const section = document.createElement("div");

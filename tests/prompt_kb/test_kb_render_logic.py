@@ -132,3 +132,25 @@ def test_template_contains_message_rendering():
     assert "kb_messages_section" in html
     assert "kb_view_session" in html
     assert "kbFilterMessageGroups" in html
+
+
+def test_template_contains_rerank_notice_and_i18n():
+    html = read_dashboard_template()
+    assert "kbLastReranked" in html
+    assert "kb_rerank_degraded" in html
+    assert "kb-rerank-notice" in html
+    # both locales
+    assert '"Reranker unavailable' in html or "Reranker unavailable" in html
+    assert "重排不可用" in html
+
+
+def test_render_kb_results_accepts_reranked_param():
+    html = read_dashboard_template()
+    assert "function renderKbResults(results, messages = [], reranked = true)" in html
+    assert "renderKbResults(data.results || [], data.messages || [], data.reranked !== false)" in html
+
+
+def test_search_placeholder_mentions_hybrid():
+    html = read_dashboard_template()
+    assert "Hybrid keyword + semantic search" in html
+    assert "关键词与语义混合搜索" in html
