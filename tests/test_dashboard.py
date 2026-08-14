@@ -2,6 +2,7 @@ import asyncio
 import base64
 import json
 import logging
+import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -1193,6 +1194,30 @@ async def test_dashboard_server_serves_session_api_and_exports(trace_db, tmp_pat
 
             async with session.get(f"http://127.0.0.1:{port}/api/sessions/bad/records") as resp:
                 assert resp.status == 404
+    finally:
+        await server.stop()
+
+
+@pytest.mark.asyncio
+async def test_dashboard_sessions_api_survives_stale_finalize_failure(trace_db, monkeypatch) -> None:
+    """Housekeeping write contention must not break the read-only sessions API."""
+    store = get_trace_store()
+    session_id = store.create_session(client="claude", proxy_mode="reverse")
+    store.append_record(session_id, _anthropic_record())
+
+    def fail_finalize(**kwargs):
+        raise sqlite3.OperationalError("trace write lock unavailable: test")
+
+    monkeypatch.setattr(store, "finalize_stale_active_sessions", fail_finalize)
+
+    server = LiveViewerServer(port=0, dashboard_mode=True)
+    port = await server.start()
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"http://127.0.0.1:{port}/api/sessions") as resp:
+                assert resp.status == 200
+                payload = await resp.json()
+                assert [item["id"] for item in payload["sessions"]] == [session_id]
     finally:
         await server.stop()
 

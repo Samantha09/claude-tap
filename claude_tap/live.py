@@ -8,6 +8,7 @@ import json
 import logging
 import re
 import secrets
+import sqlite3
 import tempfile
 import threading
 from datetime import date, datetime
@@ -373,9 +374,16 @@ class LiveViewerServer:
         return dashboard_url(self.host, self._actual_port)
 
     def _finalize_stale_active_sessions(self) -> None:
-        """Release abandoned active sessions while protecting the current writer."""
+        """Release abandoned active sessions while protecting the current writer.
+
+        Best-effort housekeeping: write-lock contention (or any store error)
+        must not fail the read-only request that triggered it.
+        """
         protected = {self.session_id} if self.session_id else set()
-        ensure_trace_store().finalize_stale_active_sessions(protected_session_ids=protected)
+        try:
+            ensure_trace_store().finalize_stale_active_sessions(protected_session_ids=protected)
+        except sqlite3.Error as exc:
+            logger.warning("Skipping stale active session finalization: %s", exc)
 
     async def _handle_dashboard_index(self, request: web.Request) -> web.Response:
         """Serve the session-first dashboard."""
