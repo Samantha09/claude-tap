@@ -211,3 +211,52 @@ DEFAULT_RERANKER_MODEL = "BAAI/bge-reranker-base"
 | reranker 下载失败（网络/TLS） | RerankerUnavailable 降级链 + 模型缓存复用现有 modelscope 路径 |
 | RRF 三通道平等未必最优 | 权重参数化预留（默认平等），实测后可调 |
 | 双 FTS 表同步遗漏导致索引漂移 | 同步点与主表同事务；rebuild-fts 兜底；迁移回填幂等 |
+
+## 实施验证
+
+**日期**：2026-08-13 ~ 2026-08-14（Task 9，分支 dev/trace-semantic-search，HEAD a74f965）
+
+### 回归
+
+- 全量单测：`.venv/bin/pytest tests/ --ignore=tests/test_e2e.py -q` → **1195 passed, 26 skipped**（75s）
+- e2e：`.venv/bin/pytest tests/test_e2e.py -q --timeout=120` → **68 passed**（23s）
+
+### 真实库迁移与 FTS 回填
+
+- 备份：`~/.local/share/claude-tap/prompt_kb.sqlite3` → `/tmp/prompt_kb_backup_pre_hybrid.sqlite3`（20MB，回填前）
+- 环境：uv tool editable 安装 `.[mcp,rag]`（sentence-transformers 5.7.0 / jieba 0.42.1 / torch 2.13.0）
+- `claude-tap kb rebuild-fts` → **fts_rebuilt=2271**（334 chunks + 1937 messages）
+- 回填后 `kb status`：`snapshots=10 chunks=334 pending=0 failed=0 indexed=334 messages=1937 messages_user=1079 messages_assistant=858`，`reranker=BAAI/bge-reranker-base`（配置见遗留 1）
+
+### 7 组查询验收
+
+| # | 查询 | reranked | 判定 | 关键结果 |
+|---|------|----------|------|----------|
+| 1 | 哪个 CLI 有沙箱 shell 工具 | yes | ✅ | chunks 首命中 tool Bash（0.540）；getDiagnostics 不再压 Bash（未入结果，低于 0.5 中性分）——2026-08-12 遗留问题修正 |
+| 2 | which CLI has a sandboxed shell tool | yes | ✅ | chunks 前两组首命中均 tool Bash（0.662/0.653）；样板 prompt_section 全部 ≈0.50 中性分，无霸榜 |
+| 3 | 怎么写 commit message | yes | ✅ | messages 区首组 user 命中 0.687（关键词独有召回，见下）；无样板/重复 |
+| 4 | 前端页面截图验证 | yes | ✅ | messages 区首命中 assistant 0.724（截图验证相关回答） |
+| 5 | 取消定时任务 cron | yes | ✅ | chunks **CronDelete 仍居首（0.729，字面命中）**，次位 CronList 0.501；`--kind tool` 变体结果一致 |
+| 6 | 沙箱 sandbox 执行命令 | yes | ✅ | chunks 前两组首命中均 tool Bash（0.694/0.686）；无样板 section 霸榜 |
+| 7 | Playwright 浏览器截图验证 | yes | ✅ | messages 区首命中 assistant 0.728；chunks 区命中均为 ≈0.50 中性分（见遗留 2） |
+
+公共验收：
+
+- 8 次执行（含 Q5 `--kind tool` 变体）输出头部均为 `reranked: yes`
+- **关键词独有召回**（messages 区最终命中中，不在向量 top-20 召回内的 FTS 独有命中，逐条核验 id）：
+  Q1 id=1792（0.619，"shell" 字面）、Q3 id=97（0.687）/ id=1727（0.661，"commit message" 字面）、
+  Q4 id=1041（0.642）、Q5 id=1850（0.715）/ id=1362（0.601，"定时任务" 字面）、Q6 id=1782（0.724）/ id=1780（0.722）
+  ——5 组中文查询全部出现关键词独有召回，且多条经 reranker 重排后进入前列
+- reranker 校准后分数恢复语义：相关命中 0.53–0.73，无关/样板回落到 ≈0.50 sigmoid 中性分
+
+### 遗留问题
+
+1. **reranker 模型获取路径偏离默认值**：本机 DLP 代理下 HF 直连与 hf-mirror 的大文件下载均停滞
+  （小文件 config.json 可下，model.safetensors 0 字节挂起）。改经 modelscope 下载同模型
+  （BAAI/bge-reranker-base，model.safetensors 1.04GB fp32），并在 `~/.config/claude-tap/config.toml`
+  配置 `reranker_model` 指向本地路径（与 embedder 的 modelscope 本地路径先例一致）。模型本体与
+  spec 决策一致，仅来源不同；`CLAUDE_TAP_KB_RERANKER_MODEL` 环境变量亦可覆盖。
+2. Q7 chunks 区无强命中（全部 ≈0.50 中性分兜底）：Playwright 相关内容主要在 messages 区，
+  chunks 侧无对应工具/section，非回归；reranker 中性分兜底行为符合设计。
+3. chunks 结果中无关 prompt_section 以 ≈0.50 中性分占位（reranker 对短样板文本给中性分），
+  不霸榜但占据条目位；如需更干净的列表可后续调 `min_score` 默认值或过滤中性分命中。
