@@ -21,7 +21,8 @@ async def test_stdio_roundtrip(tmp_path):
             tools = await session.list_tools()
             assert {"kb_search", "kb_status"} <= {t.name for t in tools.tools}
             result = await session.call_tool("kb_status", {})
-            assert not result.isError
+            # mcp 2.x renamed the wire field's Python attribute: isError → is_error.
+            assert not getattr(result, "is_error", getattr(result, "isError", False))
             payload = json.loads(result.content[0].text)
             for key in ("snapshots", "chunks", "pending", "failed", "indexed", "messages", "embedder"):
                 assert key in payload

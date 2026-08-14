@@ -17,10 +17,13 @@ if TYPE_CHECKING:
     from claude_tap.prompt_kb.embed import Embedder
     from claude_tap.prompt_kb.rerank import Reranker
 
-try:
-    from mcp.server.fastmcp import FastMCP
+try:  # mcp 2.x renamed FastMCP → MCPServer and moved the submodule
+    from mcp.server.mcpserver import MCPServer as FastMCP
 except ImportError:
-    FastMCP = None  # type: ignore[assignment]
+    try:  # mcp 1.x
+        from mcp.server.fastmcp import FastMCP
+    except ImportError:
+        FastMCP = None  # type: ignore[assignment]
 
 INSTALL_HINT = "MCP support is not installed; run: pip install 'claude-tap[mcp,rag]'"
 
