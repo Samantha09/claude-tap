@@ -4,6 +4,7 @@ import pytest
 from claude_tap.live import LiveViewerServer
 from claude_tap.prompt_kb.index import ensure_embedder_meta, index_pending
 from claude_tap.prompt_kb.store import KbStore
+from claude_tap.trace_store import get_trace_store
 from tests.prompt_kb.fake_embedder import FakeEmbedder
 
 pytestmark = pytest.mark.asyncio
@@ -45,6 +46,20 @@ async def test_kb_search_route(trace_db, seeded_kb, tmp_path):
         assert status == 200
         assert payload["results"][0]["client"] == "codex"
         assert payload["results"][0]["hits"][0]["title"] == "shell"
+        assert payload["reranked"] is False
+    finally:
+        await server.stop()
+
+
+async def test_kb_search_empty_query_has_full_shape(trace_db, seeded_kb, tmp_path):
+    """Empty query must return the same keys as a real search (results/messages/reranked)."""
+    server = LiveViewerServer(port=0, migrate_from=tmp_path, dashboard_mode=True)
+    port = await server.start()
+    try:
+        status, payload = await _get_json(port, "/api/kb/search?q=")
+        assert status == 200
+        assert payload["results"] == []
+        assert payload["messages"] == []
         assert payload["reranked"] is False
     finally:
         await server.stop()
@@ -124,6 +139,31 @@ async def test_kb_search_includes_messages(trace_db, seeded_kb_messages, tmp_pat
         assert payload["messages"][0]["hits"][0]["text"]
         assert all("role" in hit for g in payload["messages"] for hit in g["hits"])
         assert payload["results"] == []  # prompt partition still present
+    finally:
+        await server.stop()
+
+
+async def test_delete_session_without_kb_never_creates_empty_db(trace_db, tmp_path):
+    """Never-RAG users must not get an empty prompt_kb.sqlite3 from cascade delete.
+
+    Non-dashboard mode: the dashboard's background indexer intentionally owns
+    a KbStore; this test isolates the cascade-delete path.
+    """
+    from claude_tap.prompt_kb.store import default_db_path
+
+    kb_path = default_db_path()
+    assert not kb_path.exists()
+    store = get_trace_store()
+    session_id = store.create_session(client="claude", proxy_mode="reverse")
+    store.finalize_session(session_id)
+
+    server = LiveViewerServer(port=0)
+    port = await server.start()
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.delete(f"http://127.0.0.1:{port}/api/sessions/{session_id}") as resp:
+                assert resp.status == 200
+        assert not kb_path.exists()
     finally:
         await server.stop()
 

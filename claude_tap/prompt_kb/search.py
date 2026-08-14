@@ -54,6 +54,14 @@ class SessionResult:
 _RRF_K = 60
 _WORD_RE = re.compile(r"[A-Za-z0-9_一-鿿]+")
 
+# Reranker scores are sigmoid-calibrated: 0.5 is the neutral point where the
+# model sees no relevance signal. Real data shows boilerplate/irrelevant hits
+# clustered at 0.500–0.502 while weakly-relevant hits start at ~0.505, so the
+# default floor sits in that gap. Applies only to the reranked path — cosine
+# fallback scores are uncalibrated and keep their rel_delta relative floor.
+# Pass min_score=0.0 explicitly to see all hits.
+DEFAULT_MIN_SCORE = 0.505
+
 
 def _match_query(text: str) -> str:
     """Sanitize raw text into an FTS5 MATCH query (OR of word tokens)."""
@@ -147,7 +155,7 @@ def search(
     client: str | None = None,
     kind: str | None = None,
     limit: int = 10,
-    min_score: float = 0.0,
+    min_score: float | None = None,
     rel_delta: float = 0.05,
     recall: int = 20,
     reranker: Reranker | None = None,
@@ -157,7 +165,8 @@ def search(
     Three channels (vector cosine, trigram FTS, jieba FTS) are RRF-fused into
     candidates; the reranker rescores them when available. Scores are reranker
     scores when reranked=True (calibrated, rel_delta ignored), else cosine
-    fallback scores (rel_delta applies as before).
+    fallback scores (rel_delta applies as before). min_score=None applies the
+    DEFAULT_MIN_SCORE neutral-band floor when reranked, no floor on fallback.
     """
     _check_embedder_meta(store, embedder)
     rows = store.indexed_chunks()
@@ -203,17 +212,11 @@ def search(
         [cosine_by_id[int(row["id"])] for row, _score, _bonus in deduped],
     )
     if reranked:
-        kept = [
-            (row, score, bonus)
-            for (row, _cos, bonus), score in zip(deduped, final)
-            if score > min_score
-        ]
+        floor = DEFAULT_MIN_SCORE if min_score is None else min_score
+        kept = [(row, score, bonus) for (row, _cos, bonus), score in zip(deduped, final) if score > floor]
     else:
-        kept = [
-            (row, score, bonus)
-            for (row, _cos, bonus), score in zip(deduped, final)
-            if score >= min_score
-        ]
+        floor = 0.0 if min_score is None else min_score
+        kept = [(row, score, bonus) for (row, _cos, bonus), score in zip(deduped, final) if score >= floor]
         if kept:
             top = max(score for _, score, _ in kept)
             # Relative floor for uncalibrated cosine scores (rel_delta=1.0 disables).
@@ -232,9 +235,7 @@ def search(
             ),
         )
         group.session_count += bonus_sessions
-        group.hits.append(
-            SearchHit(kind=row["kind"], title=row["title"] or "", text=row["text"], score=score)
-        )
+        group.hits.append(SearchHit(kind=row["kind"], title=row["title"] or "", text=row["text"], score=score))
     ordered = sorted(
         groups.values(),
         key=lambda g: max((h.score for h in g.hits), default=0.0),
@@ -252,7 +253,7 @@ def search_messages(
     *,
     client: str | None = None,
     limit: int = 10,
-    min_score: float = 0.0,
+    min_score: float | None = None,
     rel_delta: float = 0.05,
     recall: int = 20,
     reranker: Reranker | None = None,
@@ -296,9 +297,11 @@ def search_messages(
         [cosine_by_id[int(row["id"])] for row in candidates],
     )
     if reranked:
-        kept = [(row, score) for row, score in zip(candidates, final) if score > min_score]
+        floor = DEFAULT_MIN_SCORE if min_score is None else min_score
+        kept = [(row, score) for row, score in zip(candidates, final) if score > floor]
     else:
-        kept = [(row, score) for row, score in zip(candidates, final) if score >= min_score]
+        floor = 0.0 if min_score is None else min_score
+        kept = [(row, score) for row, score in zip(candidates, final) if score >= floor]
         if kept:
             top = max(score for _, score in kept)
             kept = [(row, score) for row, score in kept if score > top - rel_delta or score == top]

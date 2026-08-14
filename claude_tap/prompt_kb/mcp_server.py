@@ -54,7 +54,7 @@ def kb_search(
     client: str | None = None,
     kind: Literal["tool", "prompt_section"] | None = None,
     limit: int = 10,
-    min_score: float = 0.0,
+    min_score: float | None = None,
     rel_delta: float = 0.05,
 ) -> dict[str, Any]:
     """Search the local prompt knowledge base (prompts, tool definitions, user messages).
@@ -64,7 +64,8 @@ def kb_search(
         client: Optional client filter, e.g. "claude-code" or "codex".
         kind: Optional chunk-kind filter for the chunks section.
         limit: Max groups per section.
-        min_score: Minimum cosine score (0-1) for a hit to be included.
+        min_score: Minimum score (0-1) for a hit to be included. Unset applies a
+            default floor above the reranker's neutral band (~0.50); pass 0 to see all hits.
         rel_delta: Relative score floor; hits below top_score - rel_delta are dropped. 1.0 disables.
 
     Returns:
@@ -85,12 +86,25 @@ def kb_search(
         pass  # dashboard's lazy indexer holds the write lock; search the stale index
     try:
         chunk_groups, chunks_reranked = search(
-            store, embedder, query, client=client, kind=kind, limit=limit, min_score=min_score,
-            rel_delta=rel_delta, reranker=reranker,
+            store,
+            embedder,
+            query,
+            client=client,
+            kind=kind,
+            limit=limit,
+            min_score=min_score,
+            rel_delta=rel_delta,
+            reranker=reranker,
         )
         message_groups, messages_reranked = search_messages(
-            store, embedder, query, client=client, limit=limit, min_score=min_score,
-            rel_delta=rel_delta, reranker=reranker,
+            store,
+            embedder,
+            query,
+            client=client,
+            limit=limit,
+            min_score=min_score,
+            rel_delta=rel_delta,
+            reranker=reranker,
         )
     except ReindexRequired as exc:
         return {"error": str(exc), "chunks": [], "messages": [], "reranked": False}

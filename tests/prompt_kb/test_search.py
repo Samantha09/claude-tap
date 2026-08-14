@@ -89,16 +89,29 @@ def test_search_respects_min_score(trace_db):
 def _seed_overlap(store: KbStore) -> None:
     """三个快照：A 与 query 全量重叠（top），B/C 部分重叠（长尾）。"""
     for client, model, seen, chunks in [
-        ("codex", "gpt-5", "2026-08-01T00:00:00Z",
-         [("prompt_section", "Guide", "alpha beta gamma delta epsilon zeta runs fast")]),
-        ("claude-code", "claude", "2026-08-02T00:00:00Z",
-         [("prompt_section", "Notes", "alpha only shares one token here")]),
-        ("claude-code", "claude", "2026-08-03T00:00:00Z",
-         [("prompt_section", "Style", "write elegant prose")]),
+        (
+            "codex",
+            "gpt-5",
+            "2026-08-01T00:00:00Z",
+            [("prompt_section", "Guide", "alpha beta gamma delta epsilon zeta runs fast")],
+        ),
+        (
+            "claude-code",
+            "claude",
+            "2026-08-02T00:00:00Z",
+            [("prompt_section", "Notes", "alpha only shares one token here")],
+        ),
+        ("claude-code", "claude", "2026-08-03T00:00:00Z", [("prompt_section", "Style", "write elegant prose")]),
     ]:
         sid, _ = store.upsert_snapshot(
-            content_hash=f"h-{client}-{seen}", client=client, provider="p", model=model,
-            system_prompt="s", developer_prompt="", tools_json="[]", seen_at=seen,
+            content_hash=f"h-{client}-{seen}",
+            client=client,
+            provider="p",
+            model=model,
+            system_prompt="s",
+            developer_prompt="",
+            tools_json="[]",
+            seen_at=seen,
         )
         store.replace_chunks(sid, chunks)
 
@@ -120,8 +133,14 @@ def test_identical_chunks_folded_across_snapshots(trace_db):
     store = KbStore.default()
     for client, seen in [("codex", "2026-08-01T00:00:00Z"), ("claude-code", "2026-08-02T00:00:00Z")]:
         sid, _ = store.upsert_snapshot(
-            content_hash=f"h-{client}", client=client, provider="p", model="m",
-            system_prompt="s", developer_prompt="", tools_json="[]", seen_at=seen,
+            content_hash=f"h-{client}",
+            client=client,
+            provider="p",
+            model="m",
+            system_prompt="s",
+            developer_prompt="",
+            tools_json="[]",
+            seen_at=seen,
         )
         store.replace_chunks(sid, [("tool", "shell", "sandbox shell command runner")])
     embedder = FakeEmbedder()
@@ -146,8 +165,14 @@ def test_rrf_fusion_prefers_multi_channel_hits():
 
 def _seed_chinese(store: KbStore) -> None:
     sid, _ = store.upsert_snapshot(
-        content_hash="h-zh", client="codex", provider="p", model="m",
-        system_prompt="s", developer_prompt="", tools_json="[]", seen_at="2026-08-01T00:00:00Z",
+        content_hash="h-zh",
+        client="codex",
+        provider="p",
+        model="m",
+        system_prompt="s",
+        developer_prompt="",
+        tools_json="[]",
+        seen_at="2026-08-01T00:00:00Z",
     )
     store.replace_chunks(sid, [("prompt_section", "指南", "取消定时任务的正确方法")])
 
@@ -167,8 +192,14 @@ def test_jieba_channel_recalls_chinese_vector_miss(trace_db):
 def test_trigram_channel_recalls_substring_vector_miss(trace_db):
     store = KbStore.default()
     sid, _ = store.upsert_snapshot(
-        content_hash="h-cron", client="codex", provider="p", model="m",
-        system_prompt="s", developer_prompt="", tools_json="[]", seen_at="2026-08-01T00:00:00Z",
+        content_hash="h-cron",
+        client="codex",
+        provider="p",
+        model="m",
+        system_prompt="s",
+        developer_prompt="",
+        tools_json="[]",
+        seen_at="2026-08-01T00:00:00Z",
     )
     store.replace_chunks(sid, [("tool", "cron", "CronDelete cancels scheduled cron jobs")])
     embedder = FakeEmbedder()
@@ -178,6 +209,18 @@ def test_trigram_channel_recalls_substring_vector_miss(trace_db):
     results, _ = search(store, embedder, "CronDele")
     assert len(results) == 1
     assert results[0].hits[0].title == "cron"
+
+
+def test_reranked_neutral_hits_dropped_by_default(trace_db):
+    store = _indexed_store()
+    # FakeReranker: each chunk overlaps exactly half the query tokens → 0.5,
+    # the sigmoid neutral zone of a calibrated reranker (boilerplate band).
+    results, reranked = search(store, FakeEmbedder(), "shell prose", reranker=FakeReranker())
+    assert reranked is True
+    assert [h.score for g in results for h in g.hits] == []
+    # Explicit min_score=0.0 opts out of the neutral floor.
+    kept, _ = search(store, FakeEmbedder(), "shell prose", min_score=0.0, reranker=FakeReranker())
+    assert sorted(h.score for g in kept for h in g.hits) == [pytest.approx(0.5), pytest.approx(0.5)]
 
 
 def test_reranker_replaces_scores_and_drops_irrelevant(trace_db):
@@ -211,11 +254,14 @@ def test_rel_delta_ignored_when_reranked(trace_db):
     embedder = FakeEmbedder()
     ensure_embedder_meta(store, embedder)
     index_pending(store, embedder)
-    results, reranked = search(store, embedder, "alpha beta gamma delta epsilon zeta", reranker=FakeReranker())
+    results, reranked = search(
+        store, embedder, "alpha beta gamma delta epsilon zeta", min_score=0.0, reranker=FakeReranker()
+    )
     assert reranked is True
     # FakeReranker scores: A=1.0 (full overlap), B=1/6 ("alpha"), C=0.0 (dropped
     # by the strict reranked filter). B survives despite being far below the
     # top score: rel_delta is not applied to calibrated reranker scores.
+    # min_score=0.0 opts out of the default neutral floor so B is visible.
     assert len(results) == 2
     scores = sorted(h.score for r in results for h in r.hits)
     assert scores == [pytest.approx(1 / 6), pytest.approx(1.0)]

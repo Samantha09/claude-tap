@@ -68,10 +68,16 @@ def test_search_min_score(seeded):
 def test_message_hit_carries_role(seeded):
     store, embedder = seeded
     store.upsert_message(
-        session_id="s1", record_index=9, message_index=0, client="claude",
-        model="k3", timestamp="2026-08-02T00:00:00Z", content_hash="h9",
+        session_id="s1",
+        record_index=9,
+        message_index=0,
+        client="claude",
+        model="k3",
+        timestamp="2026-08-02T00:00:00Z",
+        content_hash="h9",
         text="the race condition fix is a strict lock ordering protocol",
-        seen_at="t", role="assistant",
+        seen_at="t",
+        role="assistant",
     )
     index_pending(store, embedder)
     results, _ = search_messages(store, embedder, "race condition lock", rel_delta=1.0)
@@ -87,6 +93,18 @@ def test_messages_reranked_flag(seeded):
     assert reranked is True
     assert [g.session_id for g in results] == ["s1"]
     assert all(h.score > 0 for g in results for h in g.hits)
+
+
+def test_messages_reranked_neutral_hits_dropped_by_default(seeded):
+    store, embedder = seeded
+    # FakeReranker scores 2/3 and 1/3 for the two s1 messages; the 1/3 hit is
+    # below the default reranked floor and dropped, but an explicit
+    # min_score=0.0 opts out.
+    results, reranked = search_messages(store, embedder, "race condition lock", reranker=FakeReranker())
+    assert reranked is True
+    assert [h.score for g in results for h in g.hits] == [pytest.approx(2 / 3)]
+    kept, _ = search_messages(store, embedder, "race condition lock", min_score=0.0, reranker=FakeReranker())
+    assert sorted(h.score for g in kept for h in g.hits) == [pytest.approx(1 / 3), pytest.approx(2 / 3)]
 
 
 def test_messages_not_reranked_without_reranker(seeded):

@@ -35,7 +35,7 @@ from claude_tap.prompt_kb.rerank import RerankerUnavailable, create_reranker
 from claude_tap.prompt_kb.search import ReindexRequired
 from claude_tap.prompt_kb.search import search as kb_search
 from claude_tap.prompt_kb.search import search_messages as kb_search_messages
-from claude_tap.prompt_kb.store import KbStore
+from claude_tap.prompt_kb.store import KbStore, default_db_path
 from claude_tap.shared_dashboard import CLAUDE_TAP_VERSION, dashboard_url
 from claude_tap.trace_store import get_trace_store, resolve_db_path
 from claude_tap.viewer import (
@@ -202,7 +202,14 @@ def _session_query_from_request(request: web.Request):
 
 
 def _delete_kb_messages_quietly(session_ids: list[str]) -> None:
-    """Cascade-delete KB message rows; KB failures must never block trace deletion."""
+    """Cascade-delete KB message rows; KB failures must never block trace deletion.
+
+    Skipped entirely when no KB database exists yet: KbStore creates the file
+    (and schema) eagerly, and never-RAG users must not get an empty KB just
+    because they deleted a trace session.
+    """
+    if not default_db_path().exists():
+        return
     try:
         store = KbStore.default()
     except Exception:  # noqa: BLE001
@@ -614,15 +621,18 @@ class LiveViewerServer:
     async def _handle_kb_search(self, request: web.Request) -> web.Response:
         query = request.query.get("q", "").strip()
         if not query:
-            return web.json_response({"results": []})
+            # Same response shape as a real search so clients can rely on the keys.
+            return web.json_response({"results": [], "messages": [], "reranked": False})
         try:
             embedder = self._kb_embedder()
         except EmbedderUnavailable as exc:
             return self._kb_unavailable_response(exc)
         try:
-            min_score = float(request.query.get("min_score", "") or 0.0)
+            # Absent/empty → None: the search layer applies its reranked-path
+            # neutral-band default (DEFAULT_MIN_SCORE) only when calibrated.
+            min_score = float(request.query.get("min_score", "")) if request.query.get("min_score") else None
         except ValueError:
-            min_score = 0.0
+            min_score = None
         try:
             rel_delta = float(request.query.get("rel_delta", "") or 0.05)
         except ValueError:
