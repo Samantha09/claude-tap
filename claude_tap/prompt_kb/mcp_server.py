@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from claude_tap.prompt_kb.embed import EmbedderUnavailable, create_embedder, load_config
 from claude_tap.prompt_kb.index import index_pending
+from claude_tap.prompt_kb.recall import recall_memories, recent_overview
 from claude_tap.prompt_kb.rerank import RerankerUnavailable, create_reranker, reranker_status
 from claude_tap.prompt_kb.search import ReindexRequired, search, search_messages
 from claude_tap.prompt_kb.store import KbStore
@@ -161,6 +162,82 @@ def kb_status() -> dict[str, Any]:
         return {"error": f"kb unavailable: {exc}"}
 
 
+def kb_recall(
+    query: str,
+    client: str | None = None,
+    limit: int = 5,
+    min_score: float | None = None,
+) -> dict[str, Any]:
+    """Recall what past sessions said about a topic (chat-message corpus, user + assistant).
+
+    Call this BEFORE answering when the user's question may relate to earlier work,
+    a stated preference, or a similar past problem. Each memory carries an
+    "attribution" line (when · which client · which session) so its origin is
+    always visible. Prompt/tool-definition search is kb_search's job, not this tool's.
+
+    Args:
+        query: Natural-language topic, e.g. "DLP proxy TLS fix".
+        client: Optional client filter, e.g. "claude-code" or "codex".
+        limit: Max memories (default 5 — memories are few and precise, not many).
+        min_score: Minimum score (0-1); unset applies the reranker neutral-band floor.
+
+    Returns:
+        {"memories": [...], "note": str, "reranked": bool}; on failure
+        {"error": str, "memories": [], "reranked": false}.
+    """
+    try:
+        store, embedder, reranker = _get_ctx()
+    except EmbedderUnavailable as exc:
+        return {"error": f"embedder unavailable: {exc}", "memories": [], "reranked": False}
+    try:
+        index_pending(store, embedder)
+    except sqlite3.OperationalError:
+        pass  # dashboard's lazy indexer holds the write lock; search the stale index
+    try:
+        return recall_memories(
+            store,
+            embedder,
+            query,
+            client=client,
+            limit=limit,
+            min_score=min_score,
+            reranker=reranker,
+            rrf_weights=load_config().rrf_weights,
+        )
+    except ReindexRequired as exc:
+        return {"error": str(exc), "memories": [], "reranked": False}
+    except EmbedderUnavailable as exc:
+        return {"error": f"embedder unavailable: {exc}", "memories": [], "reranked": False}
+    except Exception as exc:  # noqa: BLE001 - never throw a stack at the MCP client
+        return {"error": f"kb_recall failed: {exc}", "memories": [], "reranked": False}
+
+
+def kb_recent(
+    client: str | None = None,
+    sessions: int = 5,
+    messages_per_session: int = 3,
+) -> dict[str, Any]:
+    """Timeline of recent sessions — what was being worked on, newest first.
+
+    Call this when the user asks to "continue previous work" or "what were we
+    doing". Pure recency, no similarity ranking and no embedder needed. Each
+    session shows its time range, opening user message, and last exchanges.
+
+    Args:
+        client: Optional client filter, e.g. "claude-code" or "codex".
+        sessions: Max sessions (default 5).
+        messages_per_session: Trailing exchanges per session (default 3).
+
+    Returns:
+        {"sessions": [...], "note": str}; on failure {"error": str, "sessions": []}.
+    """
+    try:
+        store = KbStore.default()
+        return recent_overview(store, client=client, sessions=sessions, messages_per_session=messages_per_session)
+    except Exception as exc:  # noqa: BLE001 - never throw a stack at the MCP client
+        return {"error": f"kb_recent failed: {exc}", "sessions": []}
+
+
 def main() -> int:
     """Run the MCP stdio server; degrade to an install hint without [mcp]."""
     if FastMCP is None:
@@ -169,5 +246,7 @@ def main() -> int:
     server = FastMCP("claude-tap-kb")
     server.tool()(kb_search)
     server.tool()(kb_status)
+    server.tool()(kb_recall)
+    server.tool()(kb_recent)
     server.run()  # stdio transport
     return 0

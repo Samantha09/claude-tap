@@ -220,6 +220,44 @@ def test_kb_search_survives_index_lock(ctx, monkeypatch):
     assert result["chunks"][0]["hits"][0]["title"] == "shell"
 
 
+def test_kb_recall_returns_attributed_memories(ctx):
+    store, _ = ctx
+    _seed(store)
+    result = mcp_server.kb_recall("race condition lock")
+    assert result["note"] and result["reranked"] is False
+    mem = result["memories"][0]
+    assert "race condition" in mem["text"]
+    assert mem["attribution"].endswith("· codex · session s1")
+    assert set(result) == {"memories", "note", "reranked"}
+
+
+def test_kb_recent_returns_timeline(ctx):
+    store, _ = ctx
+    _seed(store)
+    result = mcp_server.kb_recent()
+    assert result["note"]
+    session = result["sessions"][0]
+    assert session["session_id"] == "s1"
+    assert session["first_user_message"].startswith("how do I fix the race condition")
+    assert session["recent_exchanges"][0]["role"] == "user"
+
+
+def test_kb_recall_never_raises(monkeypatch):
+    monkeypatch.setattr(mcp_server, "_get_ctx", lambda: (_ for _ in ()).throw(EmbedderUnavailable("no model")))
+    result = mcp_server.kb_recall("anything")
+    assert result["memories"] == [] and "no model" in result["error"]
+
+
+def test_kb_recent_never_raises(monkeypatch):
+    class BrokenStore:
+        def recent_sessions(self, client, limit):
+            raise sqlite3.OperationalError("locked")
+
+    monkeypatch.setattr(mcp_server.KbStore, "default", classmethod(lambda cls: BrokenStore()))
+    result = mcp_server.kb_recent()
+    assert result["sessions"] == [] and "locked" in result["error"]
+
+
 def test_main_without_mcp_extra(capsys, monkeypatch):
     monkeypatch.setattr(mcp_server, "FastMCP", None)
     assert mcp_server.main() == 2
@@ -249,7 +287,7 @@ def test_main_registers_tools_and_runs_stdio(monkeypatch):
     monkeypatch.setattr(mcp_server, "FastMCP", _FakeFastMCP)
     assert mcp_server.main() == 0
     server = _FakeFastMCP.instances[0]
-    assert server.tools == ["kb_search", "kb_status"]
+    assert server.tools == ["kb_search", "kb_status", "kb_recall", "kb_recent"]
     assert server.ran
 
 
