@@ -70,6 +70,19 @@ class KbConfig:
     passage_prefix: str = "passage: "
     reranker: str = "on"  # "on" | "off"
     reranker_model: str = DEFAULT_RERANKER_MODEL
+    # RRF channel weights (vector, trigram, jieba); equal by default.
+    rrf_weights: tuple[float, float, float] = (1.0, 1.0, 1.0)
+
+
+def _parse_rrf_weights(raw: str) -> tuple[float, float, float]:
+    """Parse "2,1,0.5" into a 3-tuple; malformed input degrades to equal weights."""
+    try:
+        parts = tuple(float(p) for p in raw.split(","))
+    except ValueError:
+        return (1.0, 1.0, 1.0)
+    if len(parts) != 3 or any(p < 0 for p in parts):
+        return (1.0, 1.0, 1.0)
+    return parts
 
 
 def load_config(path: Path | None = None) -> KbConfig:
@@ -89,12 +102,16 @@ def load_config(path: Path | None = None) -> KbConfig:
         "passage_prefix",
         "reranker",
         "reranker_model",
+        "rrf_weights",
     ):
         env = os.environ.get(f"CLAUDE_TAP_KB_{key.upper()}")
         if env:
             values[key] = env
     known = {f for f in KbConfig.__dataclass_fields__}
-    return KbConfig(**{k: v for k, v in values.items() if k in known})
+    clean = {k: v for k, v in values.items() if k in known}
+    if "rrf_weights" in clean:
+        clean["rrf_weights"] = _parse_rrf_weights(clean["rrf_weights"])
+    return KbConfig(**clean)
 
 
 class LocalEmbedder:

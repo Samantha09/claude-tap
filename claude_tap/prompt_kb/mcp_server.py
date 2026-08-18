@@ -98,6 +98,7 @@ def kb_search(
             min_score=min_score,
             rel_delta=rel_delta,
             reranker=reranker,
+            rrf_weights=load_config().rrf_weights,
         )
         message_groups, messages_reranked = search_messages(
             store,
@@ -108,6 +109,7 @@ def kb_search(
             min_score=min_score,
             rel_delta=rel_delta,
             reranker=reranker,
+            rrf_weights=load_config().rrf_weights,
         )
     except ReindexRequired as exc:
         return {"error": str(exc), "chunks": [], "messages": [], "reranked": False}

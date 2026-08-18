@@ -91,6 +91,7 @@ def kb_main(argv: list[str]) -> int:
         )
         return 0
     reranker = _reranker_or_none()
+    rrf_weights = load_config().rrf_weights
     try:
         results, chunks_reranked = search(
             store,
@@ -101,6 +102,7 @@ def kb_main(argv: list[str]) -> int:
             limit=args.limit,
             rel_delta=args.rel_delta,
             reranker=reranker,
+            rrf_weights=rrf_weights,
         )
     except ReindexRequired as exc:
         print(str(exc), file=sys.stderr)
@@ -113,6 +115,7 @@ def kb_main(argv: list[str]) -> int:
         limit=args.limit,
         rel_delta=args.rel_delta,
         reranker=reranker,
+        rrf_weights=rrf_weights,
     )
     print(f"reranked: {'yes' if chunks_reranked and messages_reranked else 'no'}")
     if message_results:

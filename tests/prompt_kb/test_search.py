@@ -163,6 +163,28 @@ def test_rrf_fusion_prefers_multi_channel_hits():
     assert set(fused) == {1, 2, 3}
 
 
+def test_rrf_fusion_weights_shift_channel_influence():
+    rankings = [[(1, 0.9)], [(2, 0.8)]]
+    assert _rrf_fuse(rankings, 10)[0] == 1  # equal weights: first channel's top wins ties
+    weighted = _rrf_fuse(rankings, 10, weights=[0.1, 1.0])
+    assert weighted[0] == 2  # second channel dominates when weighted up
+    assert set(weighted) == {1, 2}
+
+
+def test_rrf_fusion_zero_weight_drops_channel():
+    fused = _rrf_fuse([[(1, 0.9)], [(2, 0.8)]], 10, weights=[0.0, 1.0])
+    assert fused == [2]
+
+
+def test_rrf_weights_parse_from_config(tmp_path):
+    from claude_tap.prompt_kb.embed import load_config
+
+    cfg = tmp_path / "config.toml"
+    cfg.write_text('[prompt_kb]\nrrf_weights = "2,1,1"\n')
+    assert load_config(cfg).rrf_weights == (2.0, 1.0, 1.0)
+    assert load_config(tmp_path / "missing.toml").rrf_weights == (1.0, 1.0, 1.0)
+
+
 def _seed_chinese(store: KbStore) -> None:
     sid, _ = store.upsert_snapshot(
         content_hash="h-zh",

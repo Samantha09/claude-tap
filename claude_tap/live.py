@@ -662,6 +662,7 @@ class LiveViewerServer:
                 min_score=min_score,
                 rel_delta=rel_delta,
                 reranker=self._kb_reranker(),
+                rrf_weights=load_config().rrf_weights,
             )
             messages, messages_reranked = kb_search_messages(
                 KbStore.default(),
@@ -672,6 +673,7 @@ class LiveViewerServer:
                 min_score=min_score,
                 rel_delta=rel_delta,
                 reranker=self._kb_reranker(),
+                rrf_weights=load_config().rrf_weights,
             )
         except EmbedderUnavailable as exc:
             # search() may raise here too (api embedder without numpy).

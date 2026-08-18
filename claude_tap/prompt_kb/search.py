@@ -55,6 +55,10 @@ class SessionResult:
 _RRF_K = 60
 _WORD_RE = re.compile(r"[A-Za-z0-9_一-鿿]+")
 
+# Channel order for RRF weights: vector cosine, trigram FTS, jieba FTS.
+RRF_CHANNELS = ("vector", "tri", "jieba")
+DEFAULT_RRF_WEIGHTS = (1.0, 1.0, 1.0)
+
 # Reranker scores are sigmoid-calibrated: 0.5 is the neutral point where the
 # model sees no relevance signal. Real data shows boilerplate/irrelevant hits
 # clustered at 0.500–0.502 while weakly-relevant hits start at ~0.505, so the
@@ -69,25 +73,55 @@ def _match_query(text: str) -> str:
     return " OR ".join(_WORD_RE.findall(text))
 
 
-def _rrf_fuse(rankings: list[list[tuple[int, float]]], limit: int) -> list[int]:
-    """Reciprocal-rank fusion over (rowid, score) rankings → fused rowids, best first."""
+def _rrf_fuse(
+    rankings: list[list[tuple[int, float]]],
+    limit: int,
+    weights: tuple[float, ...] | None = None,
+) -> list[int]:
+    """Reciprocal-rank fusion over (rowid, score) rankings → fused rowids, best first.
+
+    weights aligns positionally with rankings (defaults to equal); a zero
+    weight disables the channel entirely.
+    """
+    if weights is None:
+        weights = (1.0,) * len(rankings)
     fused: dict[int, float] = {}
-    for ranking in rankings:
+    for weight, ranking in zip(weights, rankings):
+        if weight == 0.0:
+            continue
         for rank, (rowid, _score) in enumerate(ranking, 1):
-            fused[rowid] = fused.get(rowid, 0.0) + 1.0 / (_RRF_K + rank)
+            fused[rowid] = fused.get(rowid, 0.0) + weight / (_RRF_K + rank)
     return sorted(fused, key=fused.__getitem__, reverse=True)[:limit]
 
 
-def _fts_channels(store: KbStore, entity: str, query: str, recall: int) -> list[list[tuple[int, float]]]:
-    """Keyword rankings: trigram on raw terms, jieba-table on segmented terms."""
+def _fts_channels(store: KbStore, entity: str, query: str, recall: int) -> list[tuple[str, list[tuple[int, float]]]]:
+    """Keyword rankings as (channel, ranking) pairs: trigram on raw terms,
+    jieba-table on segmented terms. Channels with an empty MATCH are omitted,
+    so callers must pair weights by channel label, not position."""
     channels = []
     tri_match = _match_query(query)
     if tri_match:
-        channels.append(store.fts_rank(entity, "tri", tri_match, recall))
+        channels.append(("tri", store.fts_rank(entity, "tri", tri_match, recall)))
     jieba_match = _match_query(segment(query))
     if jieba_match:
-        channels.append(store.fts_rank(entity, "jieba", jieba_match, recall))
+        channels.append(("jieba", store.fts_rank(entity, "jieba", jieba_match, recall)))
     return channels
+
+
+def _fuse_candidates(
+    store: KbStore,
+    entity: str,
+    query: str,
+    vector_ranking: list[tuple[int, float]],
+    recall: int,
+    rrf_weights: tuple[float, float, float],
+) -> list[int]:
+    """RRF-fuse vector + present FTS channels, aligning weights by channel label."""
+    weight_by_channel = dict(zip(RRF_CHANNELS, rrf_weights))
+    fts = _fts_channels(store, entity, query, recall)
+    rankings = [vector_ranking, *[ranking for _channel, ranking in fts]]
+    weights = (weight_by_channel["vector"], *[weight_by_channel[channel] for channel, _ranking in fts])
+    return _rrf_fuse(rankings, recall, weights=weights)
 
 
 def _final_scores(
@@ -160,6 +194,7 @@ def search(
     rel_delta: float = 0.05,
     recall: int = 20,
     reranker: Reranker | None = None,
+    rrf_weights: tuple[float, float, float] = DEFAULT_RRF_WEIGHTS,
 ) -> tuple[list[SnapshotResult], bool]:
     """Hybrid search over chunks; returns (groups, reranked).
 
@@ -197,9 +232,7 @@ def search(
         reverse=True,
     )[:recall]
     candidate_ids = [
-        cid
-        for cid in _rrf_fuse([vector_ranking, *_fts_channels(store, "chunks", query, recall)], recall)
-        if cid in by_id
+        cid for cid in _fuse_candidates(store, "chunks", query, vector_ranking, recall, rrf_weights) if cid in by_id
     ]
     if not candidate_ids:
         return [], reranker is not None
@@ -258,6 +291,7 @@ def search_messages(
     rel_delta: float = 0.05,
     recall: int = 20,
     reranker: Reranker | None = None,
+    rrf_weights: tuple[float, float, float] = DEFAULT_RRF_WEIGHTS,
 ) -> tuple[list[SessionResult], bool]:
     """Hybrid search over indexed chat messages (user + assistant), grouped by session."""
     _check_embedder_meta(store, embedder)
@@ -284,9 +318,7 @@ def search_messages(
         reverse=True,
     )[:recall]
     candidate_ids = [
-        cid
-        for cid in _rrf_fuse([vector_ranking, *_fts_channels(store, "messages", query, recall)], recall)
-        if cid in by_id
+        cid for cid in _fuse_candidates(store, "messages", query, vector_ranking, recall, rrf_weights) if cid in by_id
     ]
     if not candidate_ids:
         return [], reranker is not None
