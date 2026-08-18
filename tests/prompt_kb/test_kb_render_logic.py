@@ -50,6 +50,15 @@ def test_js_functions_exist_in_template():
         assert f"function {fn}(" in html, fn
 
 
+def test_purge_message_wiring_exists_in_template():
+    """Message-hit purge: JS handler, DELETE endpoint call, and i18n strings."""
+    html = read_dashboard_template()
+    assert "function kbPurgeMessage(" in html
+    assert "/api/kb/messages/" in html
+    for key in ("kb_purge", "kb_purge_confirm", "kb_purged"):
+        assert f"{key}:" in html, key  # present in both i18n dictionaries
+
+
 def test_fold_merges_same_client_model_newest_first():
     groups = [
         _group("claude", "k3", "2026-08-05T10:00:00", [0.8]),

@@ -198,3 +198,222 @@ def test_fts_not_written_on_dedup_hit(trace_db):
     store.upsert_message(**{**kwargs, "session_id": "s2", "seen_at": "t2"})  # dedup hit
     ranked = store.fts_rank("messages", "tri", "reticulating", 10)
     assert len(ranked) == 1
+
+
+def _occurrences(db, message_id=None):
+    sql = "SELECT message_id, session_id, seen_at FROM kb_message_occurrences"
+    params = ()
+    if message_id is not None:
+        sql += " WHERE message_id=?"
+        params = (message_id,)
+    with sqlite3.connect(db) as conn:
+        return {(r[0], r[1]): r[2] for r in conn.execute(sql, params).fetchall()}
+
+
+def test_upsert_creates_occurrence(tmp_path):
+    db = tmp_path / "kb.sqlite3"
+    store = KbStore(db)
+    mid, _ = store.upsert_message(**_msg(seen_at="2026-08-10T01:00:00Z"))
+    assert _occurrences(db, mid) == {(mid, "s1"): "2026-08-10T01:00:00Z"}
+
+
+def test_dedup_hit_adds_occurrence_for_second_session(tmp_path):
+    db = tmp_path / "kb.sqlite3"
+    store = KbStore(db)
+    mid, _ = store.upsert_message(**_msg())
+    store.upsert_message(**_msg(session_id="s2", seen_at="2026-08-11T00:00:00Z"))
+    assert _occurrences(db, mid) == {
+        (mid, "s1"): "2026-08-10T01:00:00Z",
+        (mid, "s2"): "2026-08-11T00:00:00Z",
+    }
+
+
+def test_delete_session_keeps_shared_message_and_reassigns_representative(tmp_path):
+    db = tmp_path / "kb.sqlite3"
+    store = KbStore(db)
+    mid, _ = store.upsert_message(**_msg(seen_at="2026-08-10T01:00:00Z"))
+    store.upsert_message(**_msg(session_id="s2", seen_at="2026-08-11T00:00:00Z"))
+    store.upsert_message(**_msg(session_id="s3", seen_at="2026-08-09T00:00:00Z"))  # earliest surviving
+    assert store.delete_messages_for_session("s1") == 0  # no message rows deleted
+    assert store.stats()["messages"] == 1  # shared row survives
+    assert _occurrences(db, mid) == {
+        (mid, "s2"): "2026-08-11T00:00:00Z",
+        (mid, "s3"): "2026-08-09T00:00:00Z",
+    }
+    row = store.pending_messages(10)[0]
+    assert row["session_id"] == "s3"  # representative reassigned to earliest surviving occurrence
+
+
+def test_delete_last_occurrence_removes_message_and_fts(trace_db, tmp_path):
+    db = tmp_path / "kb.sqlite3"
+    store = KbStore(db)
+    mid, _ = store.upsert_message(**_msg(text="unique phrase about zebra crossings"))
+    store.upsert_message(**_msg(session_id="s2", text="unique phrase about zebra crossings", seen_at="t2"))
+    store.delete_messages_for_session("s1")
+    assert store.stats()["messages"] == 1
+    store.delete_messages_for_session("s2")  # last occurrence
+    assert store.stats()["messages"] == 0
+    assert store.fts_rank("messages", "tri", "zebra", 10) == []
+    assert _occurrences(db, mid) == {}
+
+
+def test_migrate_backfills_occurrences_for_existing_rows(tmp_path):
+    """存量库（有 kb_messages、无 occurrences 表）打开后回填，且幂等。"""
+    db = tmp_path / "kb.sqlite3"
+    conn = sqlite3.connect(db)
+    conn.executescript(
+        """
+        CREATE TABLE kb_messages (
+          id INTEGER PRIMARY KEY, session_id TEXT NOT NULL, record_index INTEGER NOT NULL,
+          message_index INTEGER NOT NULL, client TEXT NOT NULL, model TEXT NOT NULL,
+          timestamp TEXT NOT NULL, content_hash TEXT NOT NULL, text TEXT NOT NULL,
+          last_seen TEXT NOT NULL, embedding BLOB,
+          index_state TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0,
+          role TEXT NOT NULL DEFAULT 'user'
+        );
+        CREATE TABLE kb_sources (
+          session_id TEXT PRIMARY KEY, snapshot_id INTEGER,
+          processed_at TEXT NOT NULL, messages_done INTEGER NOT NULL DEFAULT 0
+        );
+        INSERT INTO kb_messages (session_id, record_index, message_index, client, model,
+          timestamp, content_hash, text, last_seen, role)
+        VALUES ('s1', 0, 0, 'claude', 'k3', 't', 'h1', 'old row text', '2026-08-01T00:00:00Z', 'user');
+        """
+    )
+    conn.close()
+    KbStore(db)
+    occ = _occurrences(db)
+    assert len(occ) == 1
+    assert list(occ.values()) == ["2026-08-01T00:00:00Z"]  # seen_at seeded from last_seen
+    KbStore(db)  # second open: no duplicates, no failure
+    assert len(_occurrences(db)) == 1
+
+
+def test_migrate_resets_messages_done_to_heal_lost_content(tmp_path):
+    """老库升级时把所有已处理会话重置为 messages_done=0，让 lazy 循环重新
+    提取、补回因首现会话删除而丢失的内容（并补全多会话 occurrences）。"""
+    db = tmp_path / "kb.sqlite3"
+    conn = sqlite3.connect(db)
+    conn.executescript(
+        """
+        CREATE TABLE kb_messages (
+          id INTEGER PRIMARY KEY, session_id TEXT NOT NULL, record_index INTEGER NOT NULL,
+          message_index INTEGER NOT NULL, client TEXT NOT NULL, model TEXT NOT NULL,
+          timestamp TEXT NOT NULL, content_hash TEXT NOT NULL, text TEXT NOT NULL,
+          last_seen TEXT NOT NULL, embedding BLOB,
+          index_state TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0,
+          role TEXT NOT NULL DEFAULT 'user'
+        );
+        CREATE TABLE kb_sources (
+          session_id TEXT PRIMARY KEY, snapshot_id INTEGER,
+          processed_at TEXT NOT NULL, messages_done INTEGER NOT NULL DEFAULT 0
+        );
+        INSERT INTO kb_sources (session_id, snapshot_id, processed_at, messages_done)
+        VALUES ('s1', NULL, 't', 1), ('s2', NULL, 't', 1);
+        """
+    )
+    conn.close()
+    KbStore(db)
+    with sqlite3.connect(db) as check:
+        rows = check.execute("SELECT session_id, messages_done FROM kb_sources ORDER BY session_id").fetchall()
+    assert rows == [("s1", 0), ("s2", 0)]
+    KbStore(db)  # idempotent: second open does not reset again after reprocessing
+    with sqlite3.connect(db) as check:
+        check.execute("UPDATE kb_sources SET messages_done = 1")
+    KbStore(db)
+    with sqlite3.connect(db) as check:
+        assert check.execute("SELECT MIN(messages_done) FROM kb_sources").fetchone()[0] == 1
+
+
+def _tombstones(db):
+    with sqlite3.connect(db) as conn:
+        return set(conn.execute("SELECT content_hash, client, role FROM kb_purged").fetchall())
+
+
+def test_purge_removes_row_occurrences_fts_and_writes_tombstone(tmp_path):
+    db = tmp_path / "kb.sqlite3"
+    store = KbStore(db)
+    mid, _ = store.upsert_message(**_msg(text="secret phrase about purple bananas"))
+    store.upsert_message(**_msg(session_id="s2", text="secret phrase about purple bananas", seen_at="t2"))
+    assert store.purge_message("h1", "claude", "user") == 1
+    assert store.stats()["messages"] == 0
+    assert _occurrences(db, mid) == {}
+    assert store.fts_rank("messages", "tri", "purple", 10) == []
+    assert _tombstones(db) == {("h1", "claude", "user")}
+
+
+def test_purged_content_is_never_reupserted(tmp_path):
+    db = tmp_path / "kb.sqlite3"
+    store = KbStore(db)
+    store.upsert_message(**_msg())
+    store.purge_message("h1", "claude", "user")
+    mid, created = store.upsert_message(**_msg(session_id="s9"))
+    assert (mid, created) == (0, False)
+    assert store.stats()["messages"] == 0
+    assert _occurrences(db) == {}
+
+
+def test_purge_undo_removes_tombstone_and_allows_reupsert(tmp_path):
+    db = tmp_path / "kb.sqlite3"
+    store = KbStore(db)
+    store.upsert_message(**_msg())
+    store.purge_message("h1", "claude", "user")
+    assert store.unpurge_message("h1", "claude", "user") == 1
+    assert _tombstones(db) == set()
+    mid, created = store.upsert_message(**_msg(session_id="s9"))
+    assert created is True and mid > 0
+
+
+def test_purge_nonexistent_writes_tombstone_but_deletes_nothing(tmp_path):
+    db = tmp_path / "kb.sqlite3"
+    store = KbStore(db)
+    assert store.purge_message("nope", "claude", "user") == 0  # no row to delete
+    assert _tombstones(db) == {("nope", "claude", "user")}  # preemptive tombstone
+    assert store.unpurge_message("nope", "claude", "user") == 1  # tombstone removed
+    assert store.unpurge_message("nope", "claude", "user") == 0  # already gone
+
+
+def test_purge_content_purges_every_client_role_variant(tmp_path):
+    db = tmp_path / "kb.sqlite3"
+    store = KbStore(db)
+    store.upsert_message(**_msg())
+    store.upsert_message(**_msg(client="codex"))
+    store.upsert_message(**_msg(role="assistant"))
+    assert store.purge_content("h1") == 3
+    assert store.stats()["messages"] == 0
+    assert _tombstones(db) == {
+        ("h1", "claude", "user"),
+        ("h1", "codex", "user"),
+        ("h1", "claude", "assistant"),
+    }
+
+
+def test_purge_content_with_filters_scopes_variants(tmp_path):
+    db = tmp_path / "kb.sqlite3"
+    store = KbStore(db)
+    store.upsert_message(**_msg())
+    store.upsert_message(**_msg(client="codex"))
+    assert store.purge_content("h1", client="codex") == 1
+    assert store.stats()["messages"] == 1
+    assert _tombstones(db) == {("h1", "codex", "user")}
+
+
+def test_purge_content_preemptive_tombstone_needs_full_key(tmp_path):
+    db = tmp_path / "kb.sqlite3"
+    store = KbStore(db)
+    assert store.purge_content("future-hash") == 0
+    assert _tombstones(db) == set()  # no row, no full key → nothing written
+    assert store.purge_content("future-hash", client="claude", role="user") == 0
+    assert _tombstones(db) == {("future-hash", "claude", "user")}  # preemptive
+
+
+def test_unpurge_content_removes_matching_tombstones(tmp_path):
+    db = tmp_path / "kb.sqlite3"
+    store = KbStore(db)
+    store.upsert_message(**_msg())
+    store.upsert_message(**_msg(client="codex"))
+    store.purge_content("h1")
+    assert store.unpurge_content("h1", client="codex") == 1
+    assert _tombstones(db) == {("h1", "claude", "user")}
+    assert store.unpurge_content("h1") == 1
+    assert _tombstones(db) == set()

@@ -46,6 +46,7 @@ def test_search_groups_by_session(seeded):
     assert all(h.text for h in top.hits)
     assert all(h.score > 0 for h in top.hits)
     assert top.hits[0].timestamp  # timestamp carried through
+    assert top.hits[0].content_hash in {"h0", "h1"}  # hash carried for purge
 
 
 def test_search_client_filter(seeded):

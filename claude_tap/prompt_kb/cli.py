@@ -24,6 +24,11 @@ def _build_parser() -> argparse.ArgumentParser:
     sub.add_parser("reindex")
     sub.add_parser("rebuild-fts")
     sub.add_parser("status")
+    purge_parser = sub.add_parser("purge")
+    purge_parser.add_argument("content_hash")
+    purge_parser.add_argument("--client")
+    purge_parser.add_argument("--role", choices=["user", "assistant"])
+    purge_parser.add_argument("--undo", action="store_true", help="remove the tombstone so content may be re-indexed")
     return parser
 
 
@@ -54,6 +59,26 @@ def kb_main(argv: list[str]) -> int:
     if args.command == "rebuild-fts":
         print(f"fts_rebuilt={store.rebuild_fts()}")
         return 0
+    if args.command == "purge":
+        if args.undo:
+            removed = store.unpurge_content(args.content_hash, client=args.client, role=args.role)
+            if removed:
+                print(f"unpurged={removed}")
+                return 0
+            print(f"tombstone not found for hash {args.content_hash}", file=sys.stderr)
+            return 1
+        purged = store.purge_content(args.content_hash, client=args.client, role=args.role)
+        if purged:
+            print(f"purged={purged}")
+            return 0
+        if args.client and args.role:
+            print(f"tombstoned {args.content_hash} ({args.client}/{args.role}); not yet indexed")
+            return 0
+        print(
+            f"content hash {args.content_hash} not found; pass --client and --role to block future indexing",
+            file=sys.stderr,
+        )
+        return 1
     embedder = _embedder_or_exit()
     if embedder is None:
         return 2
@@ -68,15 +93,26 @@ def kb_main(argv: list[str]) -> int:
     reranker = _reranker_or_none()
     try:
         results, chunks_reranked = search(
-            store, embedder, args.query, client=args.client, kind=args.kind, limit=args.limit,
-            rel_delta=args.rel_delta, reranker=reranker,
+            store,
+            embedder,
+            args.query,
+            client=args.client,
+            kind=args.kind,
+            limit=args.limit,
+            rel_delta=args.rel_delta,
+            reranker=reranker,
         )
     except ReindexRequired as exc:
         print(str(exc), file=sys.stderr)
         return 3
     message_results, messages_reranked = search_messages(
-        store, embedder, args.query, client=args.client, limit=args.limit,
-        rel_delta=args.rel_delta, reranker=reranker,
+        store,
+        embedder,
+        args.query,
+        client=args.client,
+        limit=args.limit,
+        rel_delta=args.rel_delta,
+        reranker=reranker,
     )
     print(f"reranked: {'yes' if chunks_reranked and messages_reranked else 'no'}")
     if message_results:
@@ -84,7 +120,7 @@ def kb_main(argv: list[str]) -> int:
         for rank, group in enumerate(message_results, 1):
             print(f"[{rank}] session {group.session_id} ({group.client} / {group.model})")
             for hit in group.hits:
-                print(f"    [{hit.role}] score={hit.score:.3f} {hit.timestamp}")
+                print(f"    [{hit.role}] score={hit.score:.3f} hash={hit.content_hash} {hit.timestamp}")
                 print(f"    {hit.text[:200]}")
     for rank, group in enumerate(results, 1):
         print(

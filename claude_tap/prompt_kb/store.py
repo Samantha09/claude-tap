@@ -8,6 +8,7 @@ redirect the trace DB automatically get an isolated KB.
 from __future__ import annotations
 
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 
 from claude_tap.prompt_kb.chunk import BOILERPLATE_TITLES
@@ -69,6 +70,20 @@ CREATE TABLE IF NOT EXISTS kb_messages (
 CREATE INDEX IF NOT EXISTS idx_kb_messages_state ON kb_messages(index_state);
 CREATE INDEX IF NOT EXISTS idx_kb_messages_session ON kb_messages(session_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_kb_messages_dedup ON kb_messages(content_hash, client, role);
+CREATE TABLE IF NOT EXISTS kb_message_occurrences (
+  message_id INTEGER NOT NULL REFERENCES kb_messages(id),
+  session_id TEXT NOT NULL,
+  seen_at TEXT NOT NULL,
+  PRIMARY KEY (message_id, session_id)
+);
+CREATE INDEX IF NOT EXISTS idx_kb_occ_session ON kb_message_occurrences(session_id);
+CREATE TABLE IF NOT EXISTS kb_purged (
+  content_hash TEXT NOT NULL,
+  client TEXT NOT NULL,
+  role TEXT NOT NULL,
+  purged_at TEXT NOT NULL,
+  PRIMARY KEY (content_hash, client, role)
+);
 CREATE VIRTUAL TABLE IF NOT EXISTS kb_fts_chunks_tri USING fts5(text, content='', tokenize='trigram');
 CREATE VIRTUAL TABLE IF NOT EXISTS kb_fts_chunks_jieba USING fts5(text, content='', tokenize='unicode61');
 CREATE VIRTUAL TABLE IF NOT EXISTS kb_fts_messages_tri USING fts5(text, content='', tokenize='trigram');
@@ -147,6 +162,22 @@ class KbStore:
         if fts_done is None or fts_done["value"] != "1":
             KbStore._backfill_fts(conn)
             conn.execute("INSERT OR REPLACE INTO kb_meta (key, value) VALUES ('fts_backfilled', '1')")
+        occ_done = conn.execute("SELECT value FROM kb_meta WHERE key='occurrences_backfilled'").fetchone()
+        if occ_done is None or occ_done["value"] != "1":
+            # Seed one occurrence per existing message row (first-seen session,
+            # seen_at from last_seen); INSERT OR IGNORE keeps it idempotent.
+            conn.execute(
+                """INSERT OR IGNORE INTO kb_message_occurrences (message_id, session_id, seen_at)
+                   SELECT id, session_id, last_seen FROM kb_messages"""
+            )
+            conn.execute("INSERT OR REPLACE INTO kb_meta (key, value) VALUES ('occurrences_backfilled', '1')")
+            # Heal pass: pre-occurrences deletion dropped shared rows with the
+            # first-seen session, silently unindexing content still present in
+            # surviving sessions. Resetting messages_done makes the lazy loop
+            # re-extract every processed session — restoring lost rows and
+            # completing the occurrence graph. Tombstoned (purged) content is
+            # skipped by upsert_message and never resurrected.
+            conn.execute("UPDATE kb_sources SET messages_done = 0")
 
     @classmethod
     def default(cls) -> "KbStore":
@@ -299,10 +330,20 @@ class KbStore:
     ) -> tuple[int, bool]:
         """Insert a message chunk; dedup on (content_hash, client, role).
 
-        Returns (message_id, created). On dedup hit only last_seen is updated
-        and the first-seen session_id is kept.
+        Returns (message_id, created) — (0, False) when the content is
+        tombstoned by purge_message: purged content must never be resurrected
+        by re-extraction or heal backfills. On dedup hit only last_seen is
+        updated. Every non-purged upsert records a (message_id, session_id)
+        occurrence — session deletion removes occurrences, and the message row
+        lives until its last occurrence is gone.
         """
         with self._connect() as conn:
+            purged = conn.execute(
+                "SELECT 1 FROM kb_purged WHERE content_hash=? AND client=? AND role=?",
+                (content_hash, client, role),
+            ).fetchone()
+            if purged is not None:
+                return 0, False
             row = conn.execute(
                 "SELECT id FROM kb_messages WHERE content_hash=? AND client=? AND role=?",
                 (content_hash, client, role),
@@ -312,6 +353,10 @@ class KbStore:
                     "UPDATE kb_messages SET last_seen=? WHERE id=?",
                     (seen_at, row["id"]),
                 )
+                conn.execute(
+                    "INSERT OR IGNORE INTO kb_message_occurrences (message_id, session_id, seen_at) VALUES (?, ?, ?)",
+                    (row["id"], session_id, seen_at),
+                )
                 return int(row["id"]), False
             cur = conn.execute(
                 """INSERT INTO kb_messages
@@ -320,8 +365,13 @@ class KbStore:
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (session_id, record_index, message_index, client, model, timestamp, content_hash, text, seen_at, role),
             )
-            _fts_insert(conn, "messages", int(cur.lastrowid), text)
-            return int(cur.lastrowid), True
+            message_id = int(cur.lastrowid)
+            conn.execute(
+                "INSERT OR IGNORE INTO kb_message_occurrences (message_id, session_id, seen_at) VALUES (?, ?, ?)",
+                (message_id, session_id, seen_at),
+            )
+            _fts_insert(conn, "messages", message_id, text)
+            return message_id, True
 
     def pending_messages(self, limit: int) -> list[sqlite3.Row]:
         with self._connect() as conn:
@@ -356,7 +406,7 @@ class KbStore:
     def indexed_messages(self) -> list[sqlite3.Row]:
         with self._connect() as conn:
             return conn.execute(
-                """SELECT id, session_id, client, model, timestamp, text, embedding, role
+                """SELECT id, session_id, client, model, timestamp, text, embedding, role, content_hash
                    FROM kb_messages WHERE index_state='indexed'"""
             ).fetchall()
 
@@ -408,12 +458,115 @@ class KbStore:
             return cur.rowcount
 
     def delete_messages_for_session(self, session_id: str) -> int:
+        """Remove one session's occurrences; a message row is deleted (with its
+        FTS rows) only when its last occurrence is gone. Shared rows survive and
+        get their representative session_id reassigned to the earliest surviving
+        occurrence so search attribution never points at a deleted session.
+
+        Returns the number of message rows actually deleted.
+        """
         with self._connect() as conn:
-            rows = conn.execute("SELECT id, text FROM kb_messages WHERE session_id=?", (session_id,)).fetchall()
-            for row in rows:
-                _fts_delete(conn, "messages", row["id"], row["text"])
-            cur = conn.execute("DELETE FROM kb_messages WHERE session_id=?", (session_id,))
+            affected = conn.execute(
+                "SELECT message_id FROM kb_message_occurrences WHERE session_id=?",
+                (session_id,),
+            ).fetchall()
+            conn.execute("DELETE FROM kb_message_occurrences WHERE session_id=?", (session_id,))
+            deleted = 0
+            for row in affected:
+                mid = int(row["message_id"])
+                msg = conn.execute("SELECT session_id, text FROM kb_messages WHERE id=?", (mid,)).fetchone()
+                if msg is None:
+                    continue
+                survivor = conn.execute(
+                    """SELECT session_id FROM kb_message_occurrences
+                       WHERE message_id=? ORDER BY seen_at ASC, session_id ASC LIMIT 1""",
+                    (mid,),
+                ).fetchone()
+                if survivor is None:
+                    _fts_delete(conn, "messages", mid, msg["text"])
+                    conn.execute("DELETE FROM kb_messages WHERE id=?", (mid,))
+                    deleted += 1
+                elif msg["session_id"] == session_id:
+                    conn.execute(
+                        "UPDATE kb_messages SET session_id=? WHERE id=?",
+                        (survivor["session_id"], mid),
+                    )
+            return deleted
+
+    def purge_message(self, content_hash: str, client: str, role: str) -> int:
+        """Erase one content everywhere in the KB: FTS rows, all occurrences,
+        the message row — and write a tombstone so re-extraction/heal can never
+        resurrect it. Trace sessions are NOT touched; the content still exists
+        in the original records, it is only unindexed.
+
+        Returns 1 when a message row was deleted, 0 otherwise (tombstone is
+        written either way, so purging not-yet-indexed content also works).
+        """
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO kb_purged (content_hash, client, role, purged_at) VALUES (?, ?, ?, ?)",
+                (content_hash, client, role, datetime.now(timezone.utc).isoformat()),
+            )
+            row = conn.execute(
+                "SELECT id, text FROM kb_messages WHERE content_hash=? AND client=? AND role=?",
+                (content_hash, client, role),
+            ).fetchone()
+            if row is None:
+                return 0
+            mid = int(row["id"])
+            _fts_delete(conn, "messages", mid, row["text"])
+            conn.execute("DELETE FROM kb_message_occurrences WHERE message_id=?", (mid,))
+            conn.execute("DELETE FROM kb_messages WHERE id=?", (mid,))
+            return 1
+
+    def unpurge_message(self, content_hash: str, client: str, role: str) -> int:
+        """Remove a purge tombstone so the content may be re-indexed on the
+        next extraction/heal pass. Returns 1 when a tombstone was removed."""
+        with self._connect() as conn:
+            cur = conn.execute(
+                "DELETE FROM kb_purged WHERE content_hash=? AND client=? AND role=?",
+                (content_hash, client, role),
+            )
             return cur.rowcount
+
+    def purge_content(self, content_hash: str, *, client: str | None = None, role: str | None = None) -> int:
+        """Purge every (client, role) variant of a content hash, optionally
+        scoped by client/role. When nothing is indexed yet, a preemptive
+        tombstone is written only if BOTH client and role are given (a bare
+        hash cannot identify a future variant). Returns rows deleted."""
+        variants = self._content_variants(content_hash, client=client, role=role)
+        deleted = 0
+        for var_client, var_role in variants:
+            deleted += self.purge_message(content_hash, var_client, var_role)
+        if not variants and client and role:
+            self.purge_message(content_hash, client, role)
+        return deleted
+
+    def unpurge_content(self, content_hash: str, *, client: str | None = None, role: str | None = None) -> int:
+        """Remove tombstones for a content hash, optionally scoped by
+        client/role. Returns the number of tombstones removed."""
+        with self._connect() as conn:
+            sql = "DELETE FROM kb_purged WHERE content_hash=?"
+            params: list[str] = [content_hash]
+            if client:
+                sql += " AND client=?"
+                params.append(client)
+            if role:
+                sql += " AND role=?"
+                params.append(role)
+            return conn.execute(sql, params).rowcount
+
+    def _content_variants(self, content_hash: str, *, client: str | None, role: str | None) -> list[tuple[str, str]]:
+        with self._connect() as conn:
+            sql = "SELECT DISTINCT client, role FROM kb_messages WHERE content_hash=?"
+            params: list[str] = [content_hash]
+            if client:
+                sql += " AND client=?"
+                params.append(client)
+            if role:
+                sql += " AND role=?"
+                params.append(role)
+            return [(str(r["client"]), str(r["role"])) for r in conn.execute(sql, params).fetchall()]
 
     def get_meta(self, key: str) -> str | None:
         with self._connect() as conn:

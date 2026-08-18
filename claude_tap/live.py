@@ -284,6 +284,7 @@ class LiveViewerServer:
         app.router.add_get("/api/sessions/{session_id}/export/html", self._handle_export_html)
         app.router.add_get("/api/stats", self._handle_stats)
         app.router.add_get("/api/kb/search", self._handle_kb_search)
+        app.router.add_delete("/api/kb/messages/{content_hash}", self._handle_kb_purge_message)
         app.router.add_get("/api/kb/status", self._handle_kb_status)
         app.router.add_post("/api/kb/reindex", self._handle_kb_reindex)
         app.router.add_get("/api/kb/timeline", self._handle_kb_timeline)
@@ -618,6 +619,19 @@ class LiveViewerServer:
             status=501,
         )
 
+    async def _handle_kb_purge_message(self, request: web.Request) -> web.Response:
+        """Erase one content hash everywhere in the KB (tombstoned against
+        re-indexing). Trace sessions are never touched. Optional client/role
+        query params scope the purge to a single variant."""
+        content_hash = request.match_info["content_hash"]
+        client = request.query.get("client") or None
+        role = request.query.get("role") or None
+        store = KbStore.default()
+        purged = store.purge_content(content_hash, client=client, role=role)
+        if purged == 0 and not (client and role):
+            return web.json_response({"purged": 0}, status=404)
+        return web.json_response({"purged": purged})
+
     async def _handle_kb_search(self, request: web.Request) -> web.Response:
         query = request.query.get("q", "").strip()
         if not query:
@@ -676,7 +690,13 @@ class LiveViewerServer:
                         "client": group.client,
                         "model": group.model,
                         "hits": [
-                            {"text": h.text, "timestamp": h.timestamp, "score": h.score, "role": h.role}
+                            {
+                                "text": h.text,
+                                "timestamp": h.timestamp,
+                                "score": h.score,
+                                "role": h.role,
+                                "content_hash": h.content_hash,
+                            }
                             for h in group.hits
                         ],
                     }

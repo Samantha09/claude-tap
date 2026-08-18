@@ -224,6 +224,65 @@ def test_extract_unprocessed_backfill_keeps_failed_session_retriable(trace_db, m
     assert store.sources_missing_messages() == [session_id]
 
 
+def _simulate_pre_occurrences_loss(db_path):
+    """旧语义的删除结果：共享行整体消失、无 occurrences、无迁移标志。"""
+    import sqlite3
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("DELETE FROM kb_message_occurrences")
+        conn.execute("DELETE FROM kb_messages")
+        conn.execute("DELETE FROM kb_meta WHERE key='occurrences_backfilled'")
+
+
+def test_heal_restores_message_lost_to_first_seen_session_delete(trace_db):
+    """共享行的首现会话被删后内容丢失；迁移触发 messages_done 重置，
+    lazy 回填从存活会话把内容补回来并登记 occurrence。"""
+    from claude_tap.prompt_kb.store import default_db_path
+
+    trace = get_trace_store()
+    live_sid = trace.create_session(client="claude-code", proxy_mode="reverse")
+    trace.append_record(live_sid, _anthropic_record())
+    store = KbStore.default()
+    # 已删的首现会话 s-gone 持有去重行；存活会话 dedup 命中不建行。
+    store.record_source("s-gone", None, "2026-08-01T00:00:00Z", messages_done=True)
+    extract_messages(store, session_id="s-gone", client="claude-code", records=[_anthropic_record()])
+    extract_messages(store, session_id=live_sid, client="claude-code", records=[_anthropic_record()])
+    store.record_source(live_sid, None, "2026-08-01T00:00:00Z", messages_done=True)
+    assert store.stats()["messages"] == 1
+
+    _simulate_pre_occurrences_loss(default_db_path())
+    assert store.stats()["messages"] == 0  # 旧语义下的丢失现场
+
+    store = KbStore.default()  # 迁移：重置 messages_done
+    result = extract_unprocessed(store, trace)
+    assert result["messages_backfilled"] == 1
+    texts = [row["text"] for row in store.pending_messages(10)]
+    assert texts == ["hi"]  # 内容从存活会话补回
+    import sqlite3
+
+    with sqlite3.connect(default_db_path()) as conn:
+        occ = conn.execute("SELECT session_id FROM kb_message_occurrences").fetchall()
+    assert occ == [(live_sid,)]
+
+
+def test_heal_never_resurrects_purged_content(trace_db):
+    """愈合回填撞上 tombstone：purge 过的内容不会被重建。"""
+    from claude_tap.prompt_kb.messages import message_content_hash
+    from claude_tap.prompt_kb.store import default_db_path
+
+    trace = get_trace_store()
+    live_sid = trace.create_session(client="claude-code", proxy_mode="reverse")
+    trace.append_record(live_sid, _anthropic_record())
+    store = KbStore.default()
+    store.record_source(live_sid, None, "2026-08-01T00:00:00Z", messages_done=True)
+    store.purge_message(message_content_hash("hi"), "claude-code", "user")
+    _simulate_pre_occurrences_loss(default_db_path())
+    store = KbStore.default()
+    result = extract_unprocessed(store, trace)
+    assert result["messages_backfilled"] == 1  # 会话被重提取
+    assert store.stats()["messages"] == 0  # 但 purge 的内容不复活
+
+
 def test_extract_session_extracts_messages_even_without_snapshot(tmp_path, monkeypatch):
     store = KbStore(tmp_path / "kb.sqlite3")
     records = [_anthropic_record()]

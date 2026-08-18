@@ -41,6 +41,7 @@ class MessageHit:
     timestamp: str
     score: float
     role: str
+    content_hash: str
 
 
 @dataclass
@@ -316,7 +317,13 @@ def search_messages(
             ),
         )
         group.hits.append(
-            MessageHit(text=row["text"], timestamp=row["timestamp"], score=float(score), role=row["role"])
+            MessageHit(
+                text=row["text"],
+                timestamp=row["timestamp"],
+                score=float(score),
+                role=row["role"],
+                content_hash=row["content_hash"],
+            )
         )
     ordered = sorted(
         groups.values(),

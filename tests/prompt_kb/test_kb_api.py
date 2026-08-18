@@ -180,3 +180,50 @@ async def test_delete_session_cascades_kb_messages(trace_db, seeded_kb_messages,
         assert store.stats()["messages"] == 0
     finally:
         await server.stop()
+
+
+async def test_kb_purge_route(trace_db, seeded_kb_messages, tmp_path):
+    store = KbStore.default()
+    assert store.stats()["messages"] == 1
+    server = LiveViewerServer(port=0, migrate_from=tmp_path, dashboard_mode=True)
+    port = await server.start()
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.delete(
+                f"http://127.0.0.1:{port}/api/kb/messages/h1?client=claude&role=user"
+            ) as resp:
+                assert resp.status == 200
+                payload = await resp.json()
+        assert payload["purged"] == 1
+        assert store.stats()["messages"] == 0
+        # Tombstoned: a later search finds nothing, and re-upsert is blocked.
+        status, payload = await _get_json(port, "/api/kb/search?q=race+condition")
+        assert status == 200
+        assert payload["messages"] == []
+        mid, created = store.upsert_message(
+            session_id="s9",
+            record_index=0,
+            message_index=0,
+            client="claude",
+            model="k3",
+            timestamp="t",
+            content_hash="h1",
+            text="how to fix the race condition",
+            seen_at="t",
+        )
+        assert (mid, created) == (0, False)
+    finally:
+        await server.stop()
+
+
+async def test_kb_purge_route_not_found(trace_db, seeded_kb_messages, tmp_path):
+    server = LiveViewerServer(port=0, migrate_from=tmp_path, dashboard_mode=True)
+    port = await server.start()
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.delete(f"http://127.0.0.1:{port}/api/kb/messages/nope") as resp:
+                assert resp.status == 404
+                payload = await resp.json()
+        assert payload["purged"] == 0
+    finally:
+        await server.stop()

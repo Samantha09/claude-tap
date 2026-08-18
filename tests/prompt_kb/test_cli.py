@@ -130,6 +130,98 @@ def test_kb_rebuild_fts(seeded_kb, capsys):
     assert seeded_kb.fts_rank("chunks", "tri", "sandbox", 10)
 
 
+def _seed_message(store, *, content_hash="h1", client="claude", role="user", session_id="sess-1"):
+    store.upsert_message(
+        session_id=session_id,
+        record_index=0,
+        message_index=0,
+        client=client,
+        model="k3",
+        timestamp="2026-08-10T01:00:00Z",
+        content_hash=content_hash,
+        text="how to fix the race condition",
+        seen_at="t",
+        role=role,
+    )
+
+
+def test_kb_search_prints_message_hash(trace_db, monkeypatch, capsys):
+    """Search output carries the content hash so users can feed it to kb purge."""
+    store = KbStore.default()
+    embedder = FakeEmbedder()
+    ensure_embedder_meta(store, embedder)
+    _seed_message(store)
+    index_pending(store, embedder)
+    monkeypatch.setattr("claude_tap.prompt_kb.cli.create_embedder", lambda config: embedder)
+    assert kb_main(["search", "race condition"]) == 0
+    assert "hash=h1" in capsys.readouterr().out
+
+
+def test_kb_purge_removes_content_and_blocks_reupsert(trace_db, capsys):
+    store = KbStore.default()
+    _seed_message(store)
+    _seed_message(store, client="codex")
+    assert kb_main(["purge", "h1"]) == 0
+    assert "purged=2" in capsys.readouterr().out
+    assert store.stats()["messages"] == 0
+    mid, created = store.upsert_message(
+        session_id="s9",
+        record_index=0,
+        message_index=0,
+        client="claude",
+        model="k3",
+        timestamp="t",
+        content_hash="h1",
+        text="how to fix the race condition",
+        seen_at="t",
+    )
+    assert (mid, created) == (0, False)  # tombstoned
+
+
+def test_kb_purge_unknown_hash_without_full_key_fails(trace_db, capsys):
+    KbStore.default()
+    assert kb_main(["purge", "nope"]) == 1
+    assert "not found" in capsys.readouterr().err
+
+
+def test_kb_purge_preemptive_with_client_and_role(trace_db, capsys):
+    store = KbStore.default()
+    assert kb_main(["purge", "future-hash", "--client", "claude", "--role", "user"]) == 0
+    assert "tombstoned" in capsys.readouterr().out
+    mid, created = store.upsert_message(
+        session_id="s9",
+        record_index=0,
+        message_index=0,
+        client="claude",
+        model="k3",
+        timestamp="t",
+        content_hash="future-hash",
+        text="x",
+        seen_at="t",
+    )
+    assert (mid, created) == (0, False)
+
+
+def test_kb_purge_undo(trace_db, capsys):
+    store = KbStore.default()
+    _seed_message(store)
+    assert kb_main(["purge", "h1"]) == 0
+    assert kb_main(["purge", "h1", "--undo"]) == 0
+    assert "unpurged=1" in capsys.readouterr().out
+    _, created = store.upsert_message(
+        session_id="s9",
+        record_index=0,
+        message_index=0,
+        client="claude",
+        model="k3",
+        timestamp="t",
+        content_hash="h1",
+        text="how to fix the race condition",
+        seen_at="t",
+    )
+    assert created is True
+
+
 def test_kb_search_embedder_unavailable(trace_db, monkeypatch, capsys):
     from claude_tap.prompt_kb.embed import EmbedderUnavailable
 

@@ -1020,6 +1020,7 @@ pre {
 .kb-results { display: flex; flex-direction: column; gap: 12px; }
 .kb-summary { font-size: 13px; color: var(--text-secondary); }
 .kb-rerank-notice { font-size: 12px; color: #8a6d1d; background: #fdf3d7; border: 1px solid #f0e0a8; border-radius: var(--radius-sm); padding: 6px 10px; margin-bottom: 8px; }
+.kb-hit-purge { align-self: flex-end; font-size: 11px; padding: 2px 8px; margin-top: 4px; }
 .kb-empty {
   padding: 32px 16px; text-align: center; color: var(--text-secondary);
   border: 1px dashed var(--border); border-radius: var(--radius-sm); font-size: 13px;
@@ -1513,6 +1514,9 @@ const DASHBOARD_I18N = {
     kb_kind_message: "Message",
     kb_role_user: "Question", kb_role_assistant: "Answer", kb_chunks_section: "Prompt snapshots",
     kb_rerank_degraded: "Reranker unavailable — fused keyword + semantic ranking.",
+    kb_purge: "Delete from KB",
+    kb_purge_confirm: "Remove this content from the knowledge base everywhere? Sessions are NOT deleted; the text stays in the original traces but becomes unsearchable.",
+    kb_purged: "Removed from the knowledge base",
   },
   "zh-CN": {
     document_title: "claude-tap 会话面板",
@@ -1657,6 +1661,9 @@ const DASHBOARD_I18N = {
     kb_kind_message: "消息",
     kb_role_user: "提问", kb_role_assistant: "回答", kb_chunks_section: "Prompt 快照",
     kb_rerank_degraded: "重排不可用——按关键词+语义融合分数排序。",
+    kb_purge: "从知识库删除",
+    kb_purge_confirm: "在知识库中全局删除这条内容？会话记录不会被删除，原文仍保留在 trace 里，只是不再被索引、搜索不到。",
+    kb_purged: "已从知识库删除",
   }
 };
 
@@ -2694,6 +2701,26 @@ function kbRenderGroupCard(group, isLatest, history = []) {
   return card;
 }
 
+function kbPurgeMessage(group, hit, btn) {
+  if (!confirm(t("kb_purge_confirm"))) return;
+  btn.disabled = true;
+  const params = new URLSearchParams({ client: group.client, role: hit.role });
+  fetch(`/api/kb/messages/${encodeURIComponent(hit.content_hash)}?${params}`, { method: "DELETE" })
+    .then(r => { if (!r.ok) throw new Error(String(r.status)); return r.json(); })
+    .then(() => {
+      // The purge is global for this content: drop every hit with the same
+      // hash/client/role, then drop groups left empty, and re-render.
+      for (const g of kbLastMessages) {
+        g.hits = (g.hits || []).filter(
+          h => !(h.content_hash === hit.content_hash && h.role === hit.role && g.client === group.client)
+        );
+      }
+      kbLastMessages = kbLastMessages.filter(g => (g.hits || []).length);
+      kbRenderFiltered();
+    })
+    .catch(() => { btn.disabled = false; });
+}
+
 function kbRenderMessageCard(group) {
   const card = document.createElement("div");
   card.className = "kb-group kb-message-group";
@@ -2712,12 +2739,20 @@ function kbRenderMessageCard(group) {
     header.appendChild(meta);
   }
   card.appendChild(header);
-  for (const hit of group.hits) card.appendChild(kbRenderHit({
-    kind: hit.role === "assistant" ? "assistant_message" : "user_message",
-    title: "",
-    text: hit.text,
-    score: hit.score,
-  }));
+  for (const hit of group.hits) {
+    const row = kbRenderHit({
+      kind: hit.role === "assistant" ? "assistant_message" : "user_message",
+      title: "",
+      text: hit.text,
+      score: hit.score,
+    });
+    const purgeBtn = document.createElement("button");
+    purgeBtn.className = "kb-btn-secondary kb-hit-purge";
+    purgeBtn.textContent = t("kb_purge");
+    purgeBtn.addEventListener("click", () => kbPurgeMessage(group, hit, purgeBtn));
+    row.appendChild(purgeBtn);
+    card.appendChild(row);
+  }
   const link = document.createElement("a");
   link.className = "kb-session-link";
   link.href = `/dashboard/session/${encodeURIComponent(group.session_id)}`;
