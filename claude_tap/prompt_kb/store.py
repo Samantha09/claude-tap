@@ -373,6 +373,50 @@ class KbStore:
             _fts_insert(conn, "messages", message_id, text)
             return message_id, True
 
+    def recent_sessions(self, client: str | None, limit: int) -> list[sqlite3.Row]:
+        """Sessions ordered by last activity (MAX occurrence seen_at desc)."""
+        sql = """
+            SELECT o.session_id AS session_id,
+                   MAX(m.client) AS client,
+                   MIN(o.seen_at) AS first_ts,
+                   MAX(o.seen_at) AS last_ts
+            FROM kb_message_occurrences o
+            JOIN kb_messages m ON m.id = o.message_id
+        """
+        params: list[object] = []
+        if client:
+            sql += " WHERE m.client = ?"
+            params.append(client)
+        sql += " GROUP BY o.session_id ORDER BY last_ts DESC LIMIT ?"
+        params.append(limit)
+        with self._connect() as conn:
+            return conn.execute(sql, params).fetchall()
+
+    def session_first_user_message(self, session_id: str) -> sqlite3.Row | None:
+        """Earliest role='user' occurrence in the session (the session's task opener)."""
+        with self._connect() as conn:
+            return conn.execute(
+                """SELECT m.text AS text, o.seen_at AS seen_at, m.client AS client
+                   FROM kb_message_occurrences o
+                   JOIN kb_messages m ON m.id = o.message_id
+                   WHERE o.session_id = ? AND m.role = 'user'
+                   ORDER BY o.seen_at ASC LIMIT 1""",
+                (session_id,),
+            ).fetchone()
+
+    def session_last_messages(self, session_id: str, n: int) -> list[sqlite3.Row]:
+        """Last n occurrences in the session, both roles, ascending seen_at."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """SELECT m.role AS role, m.text AS text, o.seen_at AS seen_at
+                   FROM kb_message_occurrences o
+                   JOIN kb_messages m ON m.id = o.message_id
+                   WHERE o.session_id = ?
+                   ORDER BY o.seen_at DESC LIMIT ?""",
+                (session_id, n),
+            ).fetchall()
+        return list(reversed(rows))
+
     def pending_messages(self, limit: int) -> list[sqlite3.Row]:
         with self._connect() as conn:
             return conn.execute(
