@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from claude_tap.prompt_kb.search import search_messages
+
 if TYPE_CHECKING:
+    from claude_tap.prompt_kb.embed import Embedder
+    from claude_tap.prompt_kb.rerank import Reranker
     from claude_tap.prompt_kb.store import KbStore
 
 RECALL_NOTE = (
@@ -65,3 +69,43 @@ def recent_overview(
             }
         )
     return {"sessions": out, "note": RECENT_NOTE}
+
+
+def recall_memories(
+    store: "KbStore",
+    embedder: "Embedder",
+    query: str,
+    *,
+    client: str | None,
+    limit: int,
+    min_score: float | None,
+    reranker: "Reranker | None",
+    rrf_weights: tuple[float, float, float],
+) -> dict[str, Any]:
+    """Flattened relevance-ranked message hits for kb_recall (messages corpus only)."""
+    groups, reranked = search_messages(
+        store,
+        embedder,
+        query,
+        client=client,
+        limit=limit,
+        min_score=min_score,
+        reranker=reranker,
+        rrf_weights=rrf_weights,
+    )
+    hits = [(hit, group) for group in groups for hit in group.hits]
+    hits.sort(key=lambda pair: pair[0].score, reverse=True)
+    memories = []
+    for hit, group in hits[:limit]:
+        memories.append(
+            {
+                "text": hit.text,
+                "role": hit.role,
+                "score": hit.score,
+                "attribution": format_attribution(hit.timestamp, group.client, group.session_id),
+                "session_id": group.session_id,
+                "client": group.client,
+                "timestamp": hit.timestamp,
+            }
+        )
+    return {"memories": memories, "note": RECALL_NOTE, "reranked": reranked}
