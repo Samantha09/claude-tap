@@ -133,6 +133,53 @@ def test_local_embedder_name_marks_prefix_space(monkeypatch):
     assert emb.name.startswith("local:some-model")
 
 
+def test_canonical_model_id_passes_plain_ids_through():
+    assert embed_mod.canonical_model_id("intfloat/multilingual-e5-small") == "intfloat/multilingual-e5-small"
+    assert embed_mod.canonical_model_id("some-model") == "some-model"
+
+
+def test_canonical_model_id_resolves_modelscope_hub_paths():
+    assert (
+        embed_mod.canonical_model_id("/Users/san/.cache/modelscope/hub/models/intfloat/multilingual-e5-small")
+        == "intfloat/multilingual-e5-small"
+    )
+    # legacy layout without the models/ segment
+    assert (
+        embed_mod.canonical_model_id("/root/.cache/modelscope/hub/BAAI/bge-reranker-base") == "BAAI/bge-reranker-base"
+    )
+    # trailing slash tolerated
+    assert (
+        embed_mod.canonical_model_id("/Users/san/.cache/modelscope/hub/models/BAAI/bge-reranker-base/")
+        == "BAAI/bge-reranker-base"
+    )
+
+
+def test_canonical_model_id_resolves_hf_cache_paths():
+    assert (
+        embed_mod.canonical_model_id(
+            "/home/u/.cache/huggingface/hub/models--intfloat--multilingual-e5-small/snapshots/ab12cd34"
+        )
+        == "intfloat/multilingual-e5-small"
+    )
+
+
+def test_canonical_model_id_keeps_unknown_absolute_paths():
+    # A bare directory is the identity: no org/name structure to recover.
+    assert embed_mod.canonical_model_id("/opt/models/my-fine-tune") == "/opt/models/my-fine-tune"
+
+
+def test_local_embedder_name_uses_canonical_id_not_path(monkeypatch):
+    """A modelscope/hf cache path and the plain model id must produce the SAME
+    embedder name, so moving the cache never forces a reindex."""
+    import sys
+
+    monkeypatch.setitem(sys.modules, "sentence_transformers", _fake_st_module([]))
+    by_path = embed_mod.LocalEmbedder("/Users/san/.cache/modelscope/hub/models/intfloat/multilingual-e5-small")
+    by_id = embed_mod.LocalEmbedder("intfloat/multilingual-e5-small")
+    assert by_path.name == by_id.name
+    assert "modelscope" not in by_path.name
+
+
 def test_api_embedder_embed_query_has_no_prefix(monkeypatch):
     """API embedders have no prefix convention: embed_query delegates to embed."""
     emb = embed_mod.ApiEmbedder(api_base="https://x.example", api_model="m", api_key="k")

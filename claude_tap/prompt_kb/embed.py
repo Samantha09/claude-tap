@@ -21,6 +21,30 @@ DEFAULT_RERANKER_MODEL = "BAAI/bge-reranker-base"
 DEFAULT_CONFIG_PATH = Path.home() / ".config" / "claude-tap" / "config.toml"
 
 
+def canonical_model_id(model_name: str) -> str:
+    """Reduce a model reference to a stable identity: plain ids pass through,
+    modelscope/hf hub cache paths collapse to "<org>/<name>", and unrecognized
+    absolute paths stay as-is (the path IS the identity there).
+
+    This keeps embedder.name (stored in kb_meta) stable across cache moves —
+    changing the on-disk location must not force a full reindex.
+    """
+    parts = [p for p in model_name.split("/") if p]
+    # modelscope hub layout: .../modelscope/hub/models/<org>/<name>
+    # (legacy layout drops the "models" segment)
+    for marker in (("modelscope", "hub", "models"), ("modelscope", "hub")):
+        for i in range(len(parts) - len(marker) - 1):
+            if tuple(parts[i : i + len(marker)]) == marker and len(parts) - i - len(marker) >= 2:
+                return "/".join(parts[i + len(marker) : i + len(marker) + 2])
+    # huggingface hub cache: .../hub/models--<org>--<name>[/snapshots/<rev>]
+    for part in parts:
+        if part.startswith("models--"):
+            org_name = part[len("models--") :].split("--", 1)
+            if len(org_name) == 2 and all(org_name):
+                return "/".join(org_name)
+    return model_name
+
+
 class EmbedderUnavailable(Exception):
     """Raised when no usable embedder is configured or installed."""
 
@@ -104,7 +128,7 @@ class LocalEmbedder:
         self._query_prefix = query_prefix
         self._passage_prefix = passage_prefix
         marker = "+e5p" if (query_prefix or passage_prefix) else ""
-        self.name = f"local:{model_name}{marker}"
+        self.name = f"local:{canonical_model_id(model_name)}{marker}"
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         vectors = self._model.encode([self._passage_prefix + t for t in texts], normalize_embeddings=True)
