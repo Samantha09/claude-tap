@@ -67,3 +67,16 @@ proxy 转发前从历史 trace 检索片段注入上下文，给 CLI 加跨会�
   （commit d4fa389）
 - ~~空 query 响应缺 messages 键~~（commit d4fa389）
 - ~~never-RAG 用户级联删建空 KB 库~~（commit d4fa389）
+
+## 已解决（2026-08-18）
+
+- ~~occurrences 表（项 3）~~：去重共享行不再随首现会话删除；实测本机库 46% 内容
+  已因此丢失（1654/3589 组），迁移+愈合回填后自愈到 1 组。另加内容级 purge
+  （tombstone 防复活，只动 KB 不碰 traces；CLI `kb purge` + dashboard 结果删除按钮）
+  （commit 7460cae）
+- ~~modelscope 一等支持（项 1）~~：瘦身落地为 embedder 身份与路径解耦
+  （`canonical_model_id`，commit 25b54b5）；SDK 自动下载砍掉——本机模型已就位，
+  不值得引入依赖
+- ~~RRF 权重调优（项 2）~~：参数化落地（`rrf_weights` 配置 + 三端透传），
+  7 组真实查询 × 5 组权重对比结论为**维持 (1,1,1)**——reranker 校准后权重只影响
+  候选池，当前规模不敏感。验证记录：2026-08-18-rrf-weights-tuning.md

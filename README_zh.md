@@ -628,7 +628,7 @@ macOS 上，`claude-tap build-macos-app` 会生成本地 `Claude Tap.app`。该 
 采集到的各家 CLI system prompt 与工具定义做语义搜索，并查看每个 client/model 的
 prompt 版本时间线。索引完全在本地完成（默认 `intfloat/multilingual-e5-small`，
 可用 `CLAUDE_TAP_KB_EMBEDDER=api` 等环境变量切换到 OpenAI 兼容 embedding API）。
-命令行等价物：`claude-tap kb search "..."` / `claude-tap kb reindex` / `claude-tap kb status`。
+命令行等价物：`claude-tap kb search "..."` / `claude-tap kb reindex` / `claude-tap kb status`。消息命中带内容哈希：`claude-tap kb purge <hash>`（或知识库搜索结果上的删除按钮）把该内容从知识库全局抹除——写入墓碑，重新索引也不会复活（`kb purge --undo` 可撤销）——且不触碰底层 trace 会话记录。RRF 三通道权重（向量、trigram、jieba）可用 `CLAUDE_TAP_KB_RRF_WEIGHTS` 调整，默认 `1,1,1`。
 
 知识库也可通过 MCP（stdio）暴露给 agent：安装 `pip install 'claude-tap[mcp,rag]'` 后执行 `claude mcp add claude-tap-kb -- claude-tap mcp`，即可注册 `claude-tap-kb` server，提供两个只读工具：`kb_search`（对 prompt、工具定义与用户消息做语义检索）与 `kb_status`（索引统计）。每次 `kb_search` 会先索引新采集的 trace，dashboard 未运行时结果依然新鲜。若知识库积压了大量未索引的 trace，建议先手动执行一次 `claude-tap kb reindex`，避免首次工具调用耗时过长。
 
